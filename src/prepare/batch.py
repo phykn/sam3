@@ -1,6 +1,6 @@
 import torch
 
-from ..data import prompt as prompt_data
+from . import prompt as prompt_data
 
 
 def build_prompt(

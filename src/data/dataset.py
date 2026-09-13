@@ -3,7 +3,8 @@ from typing import Any
 import numpy as np
 from torch.utils.data import Dataset
 
-from . import image as image_data, item
+from ..prepare import image as image_data
+from . import item
 from .augment.image.crop import random_crop
 from .augment.image.flip import random_flip
 from .augment.image.pixel import random_pixel

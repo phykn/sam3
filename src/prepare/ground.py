@@ -82,7 +82,9 @@ def build_masks(
     if masks is None:
         return None, None
 
-    masks = torch.as_tensor(np.asarray(masks), dtype=torch.float32, device=device)
+    if not isinstance(masks, torch.Tensor):
+        masks = np.asarray(masks)
+    masks = torch.as_tensor(masks, dtype=torch.float32, device=device)
     if masks.dim() == 2:
         masks = masks[None, None, None]
     elif masks.dim() == 3:

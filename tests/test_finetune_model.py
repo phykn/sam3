@@ -3,7 +3,7 @@ import copy
 import pytest
 import torch
 from src.finetune.loss import finetune_loss
-from src.finetune.model import FinetuneModel
+from src.adapt.model import FinetuneModel
 from torch import nn
 
 
@@ -118,7 +118,7 @@ def test_lora_modules_are_not_registered_twice():
 
 
 def test_build_prompt_merges_box_and_point_inputs():
-    from src.finetune.prompt import build_prompt
+    from src.prepare.batch import build_prompt
 
     points, mask = build_prompt(
         {

@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from src.data import prompt
+from src.prepare import prompt
 
 
 def test_build_points_and_box_make_sam_prompt_labels():

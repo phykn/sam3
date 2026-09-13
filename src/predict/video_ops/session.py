@@ -5,7 +5,7 @@ import torch
 from PIL import Image
 from torch import nn
 
-from ...data import image as image_data
+from ...prepare import image as image_data
 
 
 def start(

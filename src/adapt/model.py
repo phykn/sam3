@@ -4,8 +4,8 @@ import torch
 from torch import nn
 
 from ..ml.model import Sam3ImageModel
+from ..prepare.batch import build_prompts
 from .adapter import FeatureAdapter, LoraLinear
-from .prompt import build_prompts
 from .router import Router
 
 LORA_NAMES = {"q_proj", "k_proj", "v_proj", "out_proj", "lin1", "lin2"}

@@ -1,10 +1,13 @@
 import ast
+import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1] / "src"
 WORKSPACE = ROOT.parent
 
 LAYERS = {
+    "src.prepare": 0,
     "src.data": 0,
     "src.io": 0,
     "src.ops": 0,
@@ -13,11 +16,42 @@ LAYERS = {
     "src.ml.components": 1,
     "src.ml.blocks": 2,
     "src.ml.model": 3,
-    "src.finetune": 4,
+    "src.adapt": 4,
+    "src.finetune": 5,
     "src.build": 5,
     "src.predict": 5,
     "scripts": 6,
 }
+
+
+def test_shared_preparation_and_adapters_do_not_import_workflows():
+    banned = ("src.build", "src.predict", "src.finetune", "src.api", "src.data")
+    bad = []
+    for folder in ("prepare", "adapt"):
+        for path in (ROOT / folder).rglob("*.py"):
+            for name in resolve_imports(path):
+                if any(
+                    name == prefix or name.startswith(prefix + ".") for prefix in banned
+                ):
+                    bad.append(f"{path.relative_to(WORKSPACE)}: {name}")
+    assert bad == []
+
+
+def test_prediction_import_does_not_initialize_training():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import src.predict; "
+            "assert 'src.finetune.trainer' not in sys.modules; "
+            "assert 'torch.utils.tensorboard' not in sys.modules",
+        ],
+        cwd=WORKSPACE,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def import_names(path: Path) -> list[str]:

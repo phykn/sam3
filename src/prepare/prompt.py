@@ -61,7 +61,9 @@ def build_mask(
     if value is None:
         return None
 
-    out = torch.as_tensor(np.asarray(value), dtype=torch.float32, device=device)
+    if not isinstance(value, torch.Tensor):
+        value = np.asarray(value)
+    out = torch.as_tensor(value, dtype=torch.float32, device=device)
     if out.ndim == 2:
         out = out[None, None, :, :]
     elif out.ndim == 3:

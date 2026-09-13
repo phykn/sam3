@@ -1,7 +1,7 @@
 import torch
 from src.build import build_finetune_loader, build_finetune_model, build_image_model
-from src.finetune.adapter import LoraLinear
-from src.finetune.model import FinetuneModel
+from src.adapt.adapter import LoraLinear
+from src.adapt.model import FinetuneModel
 from src.ml.model import Sam3GroundingModel, Sam3ImageModel, Sam3VideoModel
 from torch import nn
 

@@ -10,8 +10,11 @@ not depend on Hugging Face.
 config/            model and finetuning configuration templates
 finetune_dataset/  small frog/leaf finetuning dataset and previews
 notebooks/         dataset, forward, loss, and grid-prediction checks
-src/data/          dataset, augmentation, prompts, and JSON sample format
-src/finetune/      LoRA model, router, loss, checkpoint, DDP, and trainer
+src/data/          dataset, random augmentation, and JSON sample format
+src/prepare/       shared image normalization, resize, and prompt conversion
+src/adapt/         LoRA layers, feature adapters, router, and finetuning model
+src/finetune/      training loss, resume checkpoints, DDP, and trainer
+src/io/            local base weights and shared trainable-state serialization
 src/ml/            SAM 3.1 components -> workflow blocks -> assembled models
 src/predict/       single-image, grid, grounding, and video predictors
 tests/             runtime and mathematical regression tests
@@ -20,6 +23,20 @@ tests/             runtime and mathematical regression tests
 `weight/visual_token.pt` is included for no-text grounding. `asset/`, `docs/`,
 `scripts/`, `outputs/`, other weight files, and the upstream `sam3-main/`
 checkout are local-only and are not part of the remote repository.
+
+Model computation keeps the `src/ml/` components -> blocks -> model hierarchy.
+Data loading and prediction use the same `src/prepare/` conversion functions;
+random training augmentation stays in `src/data/`. LoRA computation lives in
+`src/adapt/` so importing predictors does not import the trainer or TensorBoard.
+`src/build.py` assembles models and loaders. Training state and optimizer resume
+remain owned by `src/finetune/`.
+
+Internal imports previously under `src.data.image`, `src.data.prompt`, and
+`src.data.ground` now live under `src.prepare`; `src.finetune.prompt` is now
+`src.prepare.batch`. LoRA `model`, `adapter`, and `router` modules moved from
+`src.finetune` to `src.adapt`. Public `src.build`, `src.predict`, and
+`src.finetune.FinetuneTrainer` entry points and the `sam3.finetune.v1` checkpoint
+format are unchanged. Existing `src.finetune.checkpoint` imports still work.
 
 ## Setup
 

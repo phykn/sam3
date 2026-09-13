@@ -1,9 +1,9 @@
 import torch
 from torch import nn
 
-from src.finetune.adapter import FeatureAdapter, LoraLinear
-from src.finetune.router import Router
-from src.finetune.model import FinetuneModel
+from src.adapt.adapter import FeatureAdapter, LoraLinear
+from src.adapt.router import Router
+from src.adapt.model import FinetuneModel
 from src.ml.components.sam.transformer import Attention
 
 

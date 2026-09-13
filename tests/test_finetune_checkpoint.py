@@ -7,6 +7,7 @@ from torch import nn
 from src.finetune.checkpoint import (
     FORMAT,
     load_checkpoint,
+    load_trainable_state,
     save_checkpoint,
     trainable_state,
 )
@@ -212,6 +213,19 @@ def test_checkpoint_rejects_wrong_shape(tmp_path):
     path, model, optimizer = write_bad_checkpoint(tmp_path, change_shape)
     with pytest.raises(ValueError, match="shape mismatch"):
         load_checkpoint(path, model, optimizer, {})
+
+
+def test_shape_mismatch_does_not_partially_restore_parameters():
+    model = TinyModel()
+    expected = trainable_state(model)
+    state = {name: value + 10 for name, value in expected.items()}
+    state["head.bias"] = torch.ones(9)
+
+    with pytest.raises(ValueError, match="shape mismatch: head.bias"):
+        load_trainable_state(model, state)
+
+    for name, value in trainable_state(model).items():
+        torch.testing.assert_close(value, expected[name], rtol=0, atol=0)
 
 
 def test_checkpoint_rejects_unsupported_format(tmp_path):

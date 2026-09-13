@@ -7,9 +7,9 @@ from PIL import Image
 from torch import nn
 
 from ..build import build_finetune_model
-from ..data import image as image_data, prompt
-from ..finetune.checkpoint import FORMAT, load_trainable_state
+from ..io.finetune import FORMAT, load_trainable_state
 from ..ml.model import Sam3ImageModel
+from ..prepare import image as image_data, prompt
 from .mask import format as mask_format
 
 

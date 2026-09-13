@@ -1,5 +1,5 @@
 import torch
-from src.data import ground
+from src.prepare import ground
 
 
 def test_build_points_and_boxes_for_grounding_prompt():

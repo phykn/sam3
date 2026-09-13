@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from src.data import image
+from src.prepare import image
 
 
 def test_to_tensor_normalizes_uint8_hwc_image():

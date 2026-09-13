@@ -6,9 +6,9 @@ import torch
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
+from ..prepare.image import to_tensor
 from .dataset import TrainDataset, ValidDataset, validate_cond, validate_label
 from .folder import expand
-from .image import to_tensor
 
 
 def mask_to_tensor(mask: np.ndarray) -> torch.Tensor:

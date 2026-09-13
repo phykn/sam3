@@ -1,5 +1,5 @@
+from .adapt.model import FinetuneModel
 from .data.dataloader import InfiniteLoader, make_finetune_loader
-from .finetune.model import FinetuneModel
 from .ml.model import Sam3GroundingModel, Sam3ImageModel, Sam3VideoModel
 
 

@@ -7,8 +7,9 @@ import torch
 from PIL import Image
 from torch import nn
 
-from ..data import ground, image as image_data, pack, prompt as prompt_data
+from ..data import pack
 from ..ml.model import Sam3GroundingModel
+from ..prepare import ground, image as image_data, prompt as prompt_data
 from .ground_ops import output, reference, sim
 from .mask import format as mask_format
 from .mask.component import largest

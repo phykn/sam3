@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 import torch
-from src.data import ground
+from src.prepare import ground
 from src.ml.blocks.grounding.decoder import GroundingDecoder
 from src.ml.blocks.grounding.image import GroundingImage
 from src.ml.model import Sam3GroundingModel

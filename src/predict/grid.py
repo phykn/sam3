@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from PIL import Image
 
-from ..data import image as image_data
+from ..prepare import image as image_data
 from .grid_ops.boxes import filter_crop, filter_image, is_edge_cut
 from .grid_ops.candidates import (
     format_logits,

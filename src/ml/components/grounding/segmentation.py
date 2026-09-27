@@ -86,12 +86,7 @@ class SegmentationHead(nn.Module):
 
     @property
     def device(self):
-        self._device = getattr(self, "_device", None) or next(self.parameters()).device
-        return self._device
-
-    def to(self, *args, **kwargs):
-        self._device = None
-        return super().to(*args, **kwargs)
+        return next(self.parameters()).device
 
     def _unwrap_feats(self, backbone_feats: list[torch.Tensor]) -> list[torch.Tensor]:
         return [

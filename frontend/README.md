@@ -17,5 +17,11 @@ Open `http://localhost:8081`. The first image upload loads the local checkpoint
 and can take longer than later prompt updates. Set `EXPO_PUBLIC_API_URL` when the
 API is not running at `http://127.0.0.1:8000`.
 
-Run `npm run typecheck` to check TypeScript and `npm run build:web` to export
-the web build into `dist/`.
+With Node.js 24, run `npm test` for request-ordering and geometry regressions,
+`npm run typecheck` to check TypeScript, and `npm run build:web` to export the
+web build into `dist/`.
+
+`src/session.ts` owns session transitions and ignores responses from a replaced
+image. `src/useSession.ts` manages its React subscription and preview URLs.
+`src/geometry.ts` handles point/box coordinates and selection; `Canvas.tsx`
+adapts pointer events and renders those results.

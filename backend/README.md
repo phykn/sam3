@@ -17,8 +17,11 @@ resolved from the repository root. Override them with `SAM3_WEIGHT` and
 the server.
 
 Uploads are limited to 25 MiB and 40 million pixels, with dimensions checked
-before pixel decoding. HTTP routes and session state live in `app.py`; upload
-validation and mask response encoding live in `images.py`. Model inference
+before pixel decoding. HTTP routes and validation live in `app.py`; `runtime.py`
+owns model loading, inference serialization, session eviction, and shutdown
+cleanup. `create_app()` creates an independent runtime and can accept an injected
+runtime for HTTP integration tests. Upload validation and mask response encoding
+live in `images.py`. Model inference
 uses the public `src.predict.GroundPredictor` interface. Box and point prompts
 share one index sequence within each image session.
 

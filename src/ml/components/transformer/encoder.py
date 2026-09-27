@@ -3,7 +3,7 @@ from typing import Dict, List, Optional, Tuple
 import torch
 from torch import nn, Tensor
 
-from ...runtime.checkpointing import activation_ckpt_wrapper
+from ...runtime.checkpointing import activation_checkpoint
 from ..nn.activation import resolve_activation
 from ..nn.layers import clone_modules
 
@@ -300,9 +300,9 @@ class TransformerEncoder(nn.Module):
         return reference_points
 
     def _prepare_multilevel_features(self, srcs, masks, pos_embeds):
-        assert len(srcs) == self.num_feature_levels, (
-            "mismatch between expected and received # of feature levels"
-        )
+        assert (
+            len(srcs) == self.num_feature_levels
+        ), "mismatch between expected and received # of feature levels"
 
         src_flatten = []
         mask_flatten = []
@@ -384,9 +384,9 @@ class TransformerEncoder(nn.Module):
             - spatial_shapes: Spatial dimensions of each feature level
             - valid_ratios: Valid ratios for each feature level
         """
-        assert len(src) == self.num_feature_levels, (
-            "must be equal to num_feature_levels"
-        )
+        assert (
+            len(src) == self.num_feature_levels
+        ), "must be equal to num_feature_levels"
         if src_key_padding_masks is not None:
             assert len(src_key_padding_masks) == self.num_feature_levels
         if pos is not None:
@@ -416,9 +416,10 @@ class TransformerEncoder(nn.Module):
                 assert self.use_act_checkpoint, "activation ckpt not enabled in encoder"
             if encoder_extra_kwargs is not None:
                 layer_kwargs.update(encoder_extra_kwargs)
-            output = activation_ckpt_wrapper(layer)(
+            output = activation_checkpoint(
+                layer,
                 **layer_kwargs,
-                act_ckpt_enable=self.training and self.use_act_checkpoint,
+                enabled=self.training and self.use_act_checkpoint,
             )
         # return as seq first
         return (
@@ -497,12 +498,12 @@ class TransformerEncoderFusion(TransformerEncoder):
         feat_sizes: Optional[List[int]] = None,
         encoder_extra_kwargs: Optional[Dict] = None,
     ):
+        if src_key_padding_mask is None:
+            src_key_padding_mask = [None] * len(src)
         # Restore spatial shapes of vision
-        bs = src[0].shape[1]  # seq first
         if feat_sizes is not None:
+            bs = src[0].shape[1]  # seq first
             assert len(feat_sizes) == len(src)
-            if src_key_padding_mask is None:
-                src_key_padding_mask = [None] * len(src)
             for i, (h, w) in enumerate(feat_sizes):
                 src[i] = src[i].reshape(h, w, bs, -1).permute(2, 3, 0, 1)
                 src_pos[i] = src_pos[i].reshape(h, w, bs, -1).permute(2, 3, 0, 1)
@@ -512,9 +513,9 @@ class TransformerEncoderFusion(TransformerEncoder):
                     else None
                 )
         else:
-            assert all(x.dim == 4 for x in src), (
-                "expected list of (bs, c, h, w) tensors"
-            )
+            assert all(
+                x.dim() == 4 for x in src
+            ), "expected list of (bs, c, h, w) tensors"
 
         if self.add_pooled_text_to_img_feat:
             # Fusion: Add mean pooled text to image features

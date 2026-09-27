@@ -1,3 +1,4 @@
+import pytest
 import torch
 from src.ml.components.backbone.vit import Mlp
 from src.ml.runtime.fused import apply_addmm_activation
@@ -22,3 +23,24 @@ def test_mlp_runs_float32_inference_on_cpu():
 
     assert output.shape == (2, 4)
     assert output.dtype == torch.float32
+
+
+@pytest.mark.parametrize(
+    "device",
+    [
+        "cpu",
+        pytest.param(
+            "cuda",
+            marks=pytest.mark.skipif(
+                not torch.cuda.is_available(), reason="CUDA is unavailable"
+            ),
+        ),
+    ],
+)
+def test_fused_linear_without_bias_matches_reference(device):
+    linear = torch.nn.Linear(4, 8, bias=False, device=device)
+    tensor = torch.randn(2, 3, 4, device=device)
+    with torch.inference_mode():
+        expected = torch.nn.functional.gelu(linear(tensor))
+        actual = apply_addmm_activation(torch.nn.GELU, linear, tensor)
+    torch.testing.assert_close(actual, expected)

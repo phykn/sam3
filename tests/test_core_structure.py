@@ -63,7 +63,7 @@ def test_video_assembly_lives_with_blocks_and_model():
     assert not (video_components / "mlp.py").exists()
     assert not (video_components / "tracker" / "runtime" / "init.py").exists()
     assert (root / "model" / "video" / "heads.py").is_file()
-    assert (root / "model" / "video" / "init.py").is_file()
+    assert not (root / "model" / "video" / "init.py").exists()
 
 
 def test_video_assembly_blocks_have_no_unused_forward_facades():

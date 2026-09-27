@@ -157,8 +157,8 @@ class GroundPredictor:
             },
             "prompt_classes": prompt_classes,
             "features": features,
-            "feature_classes": class_ids,
-            "feature_labels": box_labels,
+            "feature_classes": class_ids.copy(),
+            "feature_labels": box_labels.copy(),
         }
 
     @torch.inference_mode()
@@ -214,11 +214,7 @@ class GroundPredictor:
     ) -> list[dict[str, object]]:
         if not state["boxes"]:
             return []
-        previous = self._copy_prompts(state)
-        state["boxes"].pop()
-        state["box_labels"].pop()
-        state["points"].pop()
-        return self._predict_prompt_change(state, previous)
+        return self.remove_prompts_at(state, [len(state["boxes"]) - 1])
 
     @torch.inference_mode()
     def update_prompt(

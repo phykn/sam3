@@ -33,6 +33,17 @@ random training augmentation stays in `src/data/`. LoRA computation lives in
 `src/build.py` assembles models and loaders. Training state and optimizer resume
 remain owned by `src/finetune/`.
 
+The web screen delegates request ordering and prompt state to
+`frontend/src/session.ts`; `useSession.ts` owns the React subscription and image
+preview lifetime. Canvas coordinate math is in `geometry.ts`. The backend app
+owns HTTP validation, while `backend/runtime.py` owns each app's model, inference
+lock, bounded session store, and shutdown cleanup.
+
+Video modules and parameters are registered directly by `VideoRuntime`; their
+checkpoint names are preserved. Activation recomputation uses one explicit
+non-reentrant call in `src/ml/runtime/checkpointing.py`, shared by attention and
+transformer consumers. It forwards tensor arguments without rewriting them.
+
 Internal imports previously under `src.data.image`, `src.data.prompt`, and
 `src.data.ground` now live under `src.prepare`; `src.finetune.prompt` is now
 `src.prepare.batch`. LoRA `model`, `adapter`, and `router` modules moved from
@@ -319,3 +330,23 @@ delta has not been trained.
 The test suite covers model structure, checkpoint loading, data, finetuning
 math, prediction, grounding, and video state. Local-only scripts and their
 script-specific tests are intentionally not part of the remote repository.
+
+API tests exercise HTTP uploads, prompt editing, error responses, session
+isolation, eviction, and cleanup without loading the large checkpoint. Neural
+regressions compare attention outputs and gradients with PyTorch, including
+padding, bias, dropout, and activation recomputation. Training rejects non-finite
+losses or gradient norms before updating parameters or saving a new step.
+
+Run the web checks with Node.js 24:
+
+```bash
+cd frontend
+npm ci
+npm test
+npm run typecheck
+npm run build:web
+```
+
+These tests cover overlapping requests, obsolete responses, failed-request
+recovery, and point/box geometry. CUDA-specific checks are skipped when no CUDA
+device is available.

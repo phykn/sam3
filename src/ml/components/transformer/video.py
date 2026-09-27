@@ -7,7 +7,7 @@ import torch.nn.functional as torchF
 from torch import nn, Tensor
 from torch.nn.attention import sdpa_kernel, SDPBackend
 
-from ...runtime.checkpointing import activation_ckpt_wrapper
+from ...runtime.checkpointing import activation_checkpoint
 from ..nn.activation import resolve_activation
 from ..nn.layers import clone_modules
 from ..sam.rope import apply_rotary_enc, apply_rotary_enc_real, compute_axial_cis
@@ -397,7 +397,8 @@ class VideoTransformerEncoder(nn.Module):
                 )
 
         for layer in self.layers:
-            image, output = activation_ckpt_wrapper(layer)(
+            image, output = activation_checkpoint(
+                layer,
                 image=image,
                 tgt=output,
                 memory_image=memory_image,
@@ -407,7 +408,7 @@ class VideoTransformerEncoder(nn.Module):
                 memory_image_pos=memory_image_pos,
                 memory_pos=memory_pos,
                 num_k_exclude_rope=num_obj_ptr_tokens,
-                act_ckpt_enable=self.training and self.use_act_checkpoint,
+                enabled=self.training and self.use_act_checkpoint,
             )
 
         if self.use_image_in_output:

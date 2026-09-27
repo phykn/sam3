@@ -7,7 +7,7 @@ from torchvision.ops.roi_align import RoIAlign
 
 from ....ops.box import cxcywh_to_xyxy
 from ....ops.tensor import inverse_sigmoid
-from ...runtime.checkpointing import activation_ckpt_wrapper
+from ...runtime.checkpointing import activation_checkpoint
 from ..nn.activation import resolve_activation
 from ..nn.layers import clone_modules, MLP
 from ..nn.position import encode_sine_position
@@ -359,13 +359,15 @@ class TransformerDecoder(nn.Module):
 
         if self.training:
             assert self.use_act_checkpoint, "activation ckpt not enabled in decoder"
-        deltas_x = activation_ckpt_wrapper(self.boxRPB_embed_x)(
+        deltas_x = activation_checkpoint(
+            self.boxRPB_embed_x,
             x=deltas_x,
-            act_ckpt_enable=self.training and self.use_act_checkpoint,
+            enabled=self.training and self.use_act_checkpoint,
         )  # bs, num_queries, W, n_heads
-        deltas_y = activation_ckpt_wrapper(self.boxRPB_embed_y)(
+        deltas_y = activation_checkpoint(
+            self.boxRPB_embed_y,
             x=deltas_y,
-            act_ckpt_enable=self.training and self.use_act_checkpoint,
+            enabled=self.training and self.use_act_checkpoint,
         )  # bs, num_queries, H, n_heads
 
         if not torch.compiler.is_dynamo_compiling():
@@ -503,7 +505,8 @@ class TransformerDecoder(nn.Module):
                 assert (
                     self.use_act_checkpoint
                 ), "Activation checkpointing not enabled in the decoder"
-            output, presence_out = activation_ckpt_wrapper(layer)(
+            output, presence_out = activation_checkpoint(
+                layer,
                 tgt=output,
                 tgt_query_pos=query_pos,
                 tgt_query_sine_embed=query_sine_embed,
@@ -522,7 +525,7 @@ class TransformerDecoder(nn.Module):
                 dac_use_selfatt_ln=self.dac_use_selfatt_ln,
                 presence_token=presence_out,
                 **(decoder_extra_kwargs or {}),
-                act_ckpt_enable=self.training and self.use_act_checkpoint,
+                enabled=self.training and self.use_act_checkpoint,
                 # ROI memory bank
                 obj_roi_memory_feat=obj_roi_memory_feat,
                 obj_roi_memory_mask=obj_roi_memory_mask,

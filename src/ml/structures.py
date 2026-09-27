@@ -8,7 +8,13 @@ class NestedTensor:
 
     def to(self, *args, **kwargs):
         tensors = self.tensors.to(*args, **kwargs)
-        mask = self.mask.to(*args, **kwargs) if self.mask is not None else None
+        mask = None
+        if self.mask is not None:
+            mask = self.mask.to(
+                device=tensors.device,
+                non_blocking=kwargs.get("non_blocking", False),
+                copy=kwargs.get("copy", False),
+            )
         return type(self)(tensors, mask)
 
     def clone(self):
@@ -34,6 +40,7 @@ class NestedTensor:
         self.tensors = self.tensors.pin_memory(device)
         if self.mask is not None:
             self.mask = self.mask.pin_memory(device)
+        return self
 
 
 pytree.register_pytree_node(

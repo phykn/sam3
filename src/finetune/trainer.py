@@ -100,6 +100,8 @@ class FinetuneTrainer:
             )
         else:
             grad_norm = self.grad_norm()
+        if not ddp.all_finite(torch.as_tensor(grad_norm, device=self.device)):
+            raise FloatingPointError(f"non-finite gradient at step {self.step}")
         self._step_updating = True
         self.optimizer.step()
         self.step += 1

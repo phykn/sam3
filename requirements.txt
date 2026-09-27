@@ -9,6 +9,7 @@ einops
 opencv-python
 tqdm
 pytest
+httpx
 tensorboard
 pyyaml
 fastapi

@@ -1,7 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import {
-  Image,
   Platform,
   Pressable,
   ScrollView,
@@ -11,207 +10,40 @@ import {
   View,
 } from 'react-native';
 
-import {
-  addBox,
-  addPoint,
-  createSession,
-  deletePoints,
-  excludeObject,
-  refineResults,
-  updateBox,
-  updatePoint,
-} from './src/api';
 import { Canvas } from './src/Canvas';
-import {
-  Box,
-  ImageSize,
-  PromptMark,
-  PromptPoint,
-  PromptTool,
-  ResultObject,
-} from './src/types';
-
-type Phase = 'idle' | 'uploading' | 'ready' | 'inferencing';
+import { useSession } from './src/useSession';
 
 export default function App() {
   const { width } = useWindowDimensions();
   const stacked = width < 900;
   const fileInput = useRef<HTMLInputElement>(null);
-  const previewUrl = useRef<string | null>(null);
-  const [phase, setPhase] = useState<Phase>('idle');
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [imageUri, setImageUri] = useState<string | null>(null);
-  const [imageSize, setImageSize] = useState<ImageSize | null>(null);
-  const [prompts, setPrompts] = useState<PromptMark[]>([]);
-  const [objects, setObjects] = useState<ResultObject[]>([]);
-  const [positive, setPositive] = useState(true);
-  const [tool, setTool] = useState<PromptTool>('point');
-  const [selectedPrompts, setSelectedPrompts] = useState<number[]>([]);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
-    };
-  }, []);
-
+  const { state, session, imageUri } = useSession();
+  const {
+    phase,
+    sessionId,
+    imageSize,
+    prompts,
+    objects,
+    positive,
+    tool,
+    selectedPrompts,
+    error,
+  } = state;
+  const {
+    openFile,
+    submitPoint,
+    submitBox,
+    editPrompt,
+    editBox,
+    removeSelected,
+    excludeResult,
+    refine,
+    setPositive,
+    setTool,
+    setSelectedPrompts,
+  } = session;
   const chooseImage = () => {
     if (Platform.OS === 'web') fileInput.current?.click();
-  };
-
-  const openFile = async (file: File) => {
-    if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
-    const uri = URL.createObjectURL(file);
-    previewUrl.current = uri;
-    setImageUri(uri);
-    setImageSize(null);
-    setSessionId(null);
-    setPrompts([]);
-    setObjects([]);
-    setPositive(true);
-    setTool('point');
-    setSelectedPrompts([]);
-    setError(null);
-    setPhase('uploading');
-    Image.getSize(uri, (imageWidth, imageHeight) => {
-      setImageSize({ width: imageWidth, height: imageHeight });
-    });
-
-    try {
-      const data = await createSession(file);
-      setSessionId(data.session_id);
-      setImageSize({ width: data.width, height: data.height });
-      setPhase('ready');
-    } catch (reason) {
-      setError(message(reason));
-      setPhase('idle');
-    }
-  };
-
-  const submitPoint = async (point: PromptPoint) => {
-    if (!sessionId || phase !== 'ready') return;
-    setError(null);
-    setPhase('inferencing');
-    try {
-      const data = await addPoint(sessionId, point, positive);
-      setPrompts((items) => [...items, { kind: 'point', point, positive }]);
-      setSelectedPrompts([]);
-      setObjects(data.objects);
-    } catch (reason) {
-      setError(message(reason));
-    } finally {
-      setPhase('ready');
-    }
-  };
-
-  const submitBox = async (box: Box) => {
-    if (!sessionId || phase !== 'ready') return;
-    setError(null);
-    setPhase('inferencing');
-    try {
-      const data = await addBox(sessionId, box, positive);
-      setPrompts((items) => [...items, { kind: 'box', box, positive }]);
-      setSelectedPrompts([]);
-      setObjects(data.objects);
-    } catch (reason) {
-      setError(message(reason));
-    } finally {
-      setPhase('ready');
-    }
-  };
-
-  const editPrompt = async (index: number, point: PromptPoint) => {
-    if (!sessionId || phase !== 'ready') return;
-    setError(null);
-    setPhase('inferencing');
-    try {
-      const data = await updatePoint(sessionId, index, point);
-      setPrompts((items) =>
-        items.map((item, itemIndex) =>
-          itemIndex === index && item.kind === 'point'
-            ? { ...item, point }
-            : item,
-        ),
-      );
-      setObjects(data.objects);
-    } catch (reason) {
-      setError(message(reason));
-    } finally {
-      setPhase('ready');
-    }
-  };
-
-  const editBox = async (index: number, box: Box) => {
-    if (!sessionId || phase !== 'ready') return;
-    setError(null);
-    setPhase('inferencing');
-    try {
-      const data = await updateBox(sessionId, index, box);
-      setPrompts((items) =>
-        items.map((item, itemIndex) =>
-          itemIndex === index && item.kind === 'box' ? { ...item, box } : item,
-        ),
-      );
-      setObjects(data.objects);
-    } catch (reason) {
-      setError(message(reason));
-    } finally {
-      setPhase('ready');
-    }
-  };
-
-  const removeSelected = async () => {
-    if (!sessionId || !selectedPrompts.length || phase !== 'ready') return;
-    const indices = [...selectedPrompts];
-    setError(null);
-    setPhase('inferencing');
-    try {
-      const data = await deletePoints(sessionId, indices);
-      setPrompts((items) =>
-        items.filter((_, itemIndex) => !indices.includes(itemIndex)),
-      );
-      setObjects(data.objects);
-      setSelectedPrompts([]);
-      if (data.prompt_count === 0) setPositive(true);
-    } catch (reason) {
-      setError(message(reason));
-    } finally {
-      setPhase('ready');
-    }
-  };
-
-  const excludeResult = async (item: ResultObject) => {
-    if (!sessionId || phase !== 'ready') return;
-    setError(null);
-    setPhase('inferencing');
-    try {
-      const data = await excludeObject(sessionId, item.object_id);
-      setPrompts((items) => [
-        ...items,
-        { kind: 'box', box: item.box, positive: false },
-      ]);
-      setSelectedPrompts([]);
-      setObjects(data.objects);
-      setPositive(false);
-    } catch (reason) {
-      setError(message(reason));
-    } finally {
-      setPhase('ready');
-    }
-  };
-
-  const refine = async () => {
-    if (!sessionId || !objects.length || phase !== 'ready') return;
-    setError(null);
-    setPhase('inferencing');
-    try {
-      const data = await refineResults(sessionId);
-      setObjects(data.objects);
-    } catch (reason) {
-      setError(message(reason));
-    } finally {
-      setPhase('ready');
-    }
   };
 
   useEffect(() => {
@@ -361,30 +193,34 @@ export default function App() {
               />
             </View>
 
-            {imageUri && <View style={styles.panel}>
-              <View style={styles.panelHeader}>
-                <Text style={styles.panelTitle}>Results</Text>
-                {objects.length > 0 && (
-                  <View style={styles.resultCount}>
-                    <Text style={styles.resultCountText}>{objects.length}</Text>
-                  </View>
-                )}
+            {imageUri && (
+              <View style={styles.panel}>
+                <View style={styles.panelHeader}>
+                  <Text style={styles.panelTitle}>Results</Text>
+                  {objects.length > 0 && (
+                    <View style={styles.resultCount}>
+                      <Text style={styles.resultCountText}>
+                        {objects.length}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                <Canvas
+                  disabled={busy}
+                  imageSize={imageSize}
+                  interactive={false}
+                  label="Mask results"
+                  loadingText={loadingText}
+                  objects={objects}
+                  onObject={(item) => void excludeResult(item)}
+                  positive={positive}
+                  prompts={[]}
+                  selectedPrompts={[]}
+                  tool="select"
+                  uri={imageUri}
+                />
               </View>
-              <Canvas
-                disabled={busy}
-                imageSize={imageSize}
-                interactive={false}
-                label="Mask results"
-                loadingText={loadingText}
-                objects={objects}
-                onObject={(item) => void excludeResult(item)}
-                positive={positive}
-                prompts={[]}
-                selectedPrompts={[]}
-                tool="select"
-                uri={imageUri}
-              />
-            </View>}
+            )}
           </View>
         </View>
       </ScrollView>
@@ -457,10 +293,7 @@ function ModeButton({
     >
       <View style={styles.modeSign}>
         <View
-          style={[
-            styles.modeSignLine,
-            active && styles.modeSignLineActive,
-          ]}
+          style={[styles.modeSignLine, active && styles.modeSignLineActive]}
         />
         {sign === 'plus' && (
           <View
@@ -472,7 +305,9 @@ function ModeButton({
           />
         )}
       </View>
-      <Text style={[styles.modeText, active && styles.modeTextActive]}>{label}</Text>
+      <Text style={[styles.modeText, active && styles.modeTextActive]}>
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -491,13 +326,11 @@ function ToolButton({
       onPress={onPress}
       style={[styles.toolButton, active && styles.toolButtonActive]}
     >
-      <Text style={[styles.toolText, active && styles.toolTextActive]}>{label}</Text>
+      <Text style={[styles.toolText, active && styles.toolTextActive]}>
+        {label}
+      </Text>
     </Pressable>
   );
-}
-
-function message(value: unknown) {
-  return value instanceof Error ? value.message : 'Something went wrong.';
 }
 
 const styles = StyleSheet.create({
@@ -511,7 +344,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 16,
   },
-  title: { color: '#152033', fontSize: 21, fontWeight: '800', letterSpacing: -0.5 },
+  title: {
+    color: '#152033',
+    fontSize: 21,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
   toolbar: {
     minHeight: 40,
     marginTop: 12,
@@ -530,18 +368,60 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     paddingLeft: 4,
   },
-  tools: { flexDirection: 'row', padding: 3, borderRadius: 11, backgroundColor: '#E8E5DE' },
-  toolButton: { height: 36, minWidth: 70, borderRadius: 8, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center' },
+  tools: {
+    flexDirection: 'row',
+    padding: 3,
+    borderRadius: 11,
+    backgroundColor: '#E8E5DE',
+  },
+  toolButton: {
+    height: 36,
+    minWidth: 70,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   toolButtonActive: { backgroundColor: '#152033' },
   toolText: { color: '#68717E', fontSize: 12, fontWeight: '800' },
   toolTextActive: { color: '#FFFFFF' },
-  modes: { flexDirection: 'row', padding: 3, borderRadius: 11, backgroundColor: '#E8E5DE' },
-  modeButton: { height: 36, minWidth: 112, borderRadius: 8, paddingHorizontal: 13, flexDirection: 'row', gap: 7, alignItems: 'center', justifyContent: 'center' },
-  modeSign: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
-  modeSignLine: { position: 'absolute', width: 10, height: 2, borderRadius: 1, backgroundColor: '#68717E' },
+  modes: {
+    flexDirection: 'row',
+    padding: 3,
+    borderRadius: 11,
+    backgroundColor: '#E8E5DE',
+  },
+  modeButton: {
+    height: 36,
+    minWidth: 112,
+    borderRadius: 8,
+    paddingHorizontal: 13,
+    flexDirection: 'row',
+    gap: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modeSign: {
+    width: 12,
+    height: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modeSignLine: {
+    position: 'absolute',
+    width: 10,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: '#68717E',
+  },
   modeSignLineActive: { backgroundColor: '#FFFFFF' },
   modeSignVertical: { transform: [{ rotate: '90deg' }] },
-  modeText: { color: '#68717E', fontSize: 12, lineHeight: 16, fontWeight: '800' },
+  modeText: {
+    color: '#68717E',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '800',
+  },
   modeTextActive: { color: '#FFFFFF' },
   button: {
     height: 40,
@@ -560,7 +440,12 @@ const styles = StyleSheet.create({
   buttonTextDanger: { color: '#B9413D' },
   disabled: { opacity: 0.35 },
   pressed: { opacity: 0.75 },
-  error: { color: '#AD3F39', fontSize: 12, fontWeight: '700', marginBottom: 10 },
+  error: {
+    color: '#AD3F39',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 10,
+  },
   panels: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   panelsStacked: { flexDirection: 'column' },
   panelsStart: { justifyContent: 'center' },
@@ -582,6 +467,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   panelTitle: { color: '#F7F3EC', fontSize: 16, fontWeight: '800' },
-  resultCount: { minWidth: 34, height: 34, borderRadius: 10, backgroundColor: '#DDF5ED', alignItems: 'center', justifyContent: 'center' },
+  resultCount: {
+    minWidth: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: '#DDF5ED',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   resultCountText: { color: '#087253', fontSize: 14, fontWeight: '900' },
 });

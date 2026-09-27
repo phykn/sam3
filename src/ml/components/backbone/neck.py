@@ -2,8 +2,17 @@ from copy import deepcopy
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from ...structures import NestedTensor
+
+
+def _with_mask(tensor, mask):
+    if mask is not None:
+        mask = F.interpolate(
+            mask[:, None].float(), size=tensor.shape[-2:], mode="nearest"
+        )[:, 0].bool()
+    return NestedTensor(tensor, mask)
 
 
 def _make_scale_convs(
@@ -85,9 +94,7 @@ class Sam3DualViTDetNeck(nn.Module):
         if add_sam2_neck:
             self.sam2_convs = deepcopy(self.convs)
 
-    def forward(
-        self, tensor_list: list[torch.Tensor]
-    ) -> tuple[
+    def forward(self, tensor_list: list[torch.Tensor]) -> tuple[
         list[torch.Tensor],
         list[torch.Tensor],
         list[torch.Tensor] | None,
@@ -159,7 +166,7 @@ class Sam3TriViTDetNeck(nn.Module):
         ):
             if need_sam3_out:
                 sam3_conv_out = conv(x_data)
-                sam3_x_out = NestedTensor(sam3_conv_out, x_mask)
+                sam3_x_out = _with_mask(sam3_conv_out, x_mask)
                 sam3_out.append(sam3_x_out)
                 sam3_pos.append(
                     self.position_encoding(sam3_conv_out).to(sam3_conv_out.dtype)
@@ -167,7 +174,7 @@ class Sam3TriViTDetNeck(nn.Module):
 
             if need_interactive_out:
                 interactive_conv_out_t = interactive_conv(x_data)
-                interactive_conv_out = NestedTensor(interactive_conv_out_t, x_mask)
+                interactive_conv_out = _with_mask(interactive_conv_out_t, x_mask)
                 interactive_out.append(interactive_conv_out)
                 interactive_pos.append(
                     self.position_encoding(interactive_conv_out_t).to(
@@ -177,7 +184,7 @@ class Sam3TriViTDetNeck(nn.Module):
 
             if need_propagation_out:
                 propagation_conv_out = propagation_conv(x_data)
-                propagation_x_out = NestedTensor(propagation_conv_out, x_mask)
+                propagation_x_out = _with_mask(propagation_conv_out, x_mask)
                 propagation_out.append(propagation_x_out)
                 propagation_pos.append(
                     self.position_encoding(propagation_conv_out).to(

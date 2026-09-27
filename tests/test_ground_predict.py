@@ -111,6 +111,37 @@ def test_encode_reference_groups_boxes_by_class_and_encodes_image_once():
     assert box_mask.tolist() == [[False, True], [False, False]]
 
 
+def test_reference_owns_class_and_label_metadata():
+    predictor = GroundPredictor(FakeGroundModel(), device="cpu")
+    classes = np.array([2, 2], dtype=np.int64)
+    labels = np.array([1, 0], dtype=np.int64)
+    reference = predictor.encode_reference(
+        Image.new("RGB", (8, 8)),
+        [[0, 0, 4, 4], [4, 4, 8, 8]],
+        classes,
+        labels,
+    )
+    classes[:] = 7
+    labels[:] = 0
+
+    assert reference["prompt_classes"].tolist() == [2]
+    assert reference["feature_classes"].tolist() == [2, 2]
+    assert reference["feature_labels"].tolist() == [1, 0]
+
+
+def test_undo_preserves_last_positive_reference_after_reordering():
+    predictor = GroundPredictor(FakeGroundModel(), device="cpu")
+    state = predictor.start(Image.new("RGB", (8, 8)))
+    predictor.add_prompt(state, [0, 0, 4, 4])
+    predictor.add_prompt(state, [4, 4, 8, 8], positive=False)
+    predictor.add_prompt(state, [0, 0, 4, 4])
+    predictor.remove_prompt_at(state, 0)
+    with pytest.raises(ValueError):
+        predictor.remove_prompt(state)
+    assert state["box_labels"] == [0, 1]
+    assert len(state["boxes"]) == len(state["points"]) == 2
+
+
 def test_encode_uses_inference_mode():
     model = FakeGroundModel()
     predictor = GroundPredictor(model, device="cpu")

@@ -4,8 +4,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 from fastapi import HTTPException, UploadFile
+from fastapi.testclient import TestClient
 from PIL import Image
-from backend import app as api
+from backend.app import create_app
+from backend.runtime import InferenceRuntime, ROOT
 from backend import images
 from starlette.datastructures import Headers
 
@@ -86,191 +88,198 @@ def image_bytes():
     return buffer.getvalue()
 
 
-def setup(monkeypatch):
-    monkeypatch.setattr(api, "_predictor", FakePredictor())
-    monkeypatch.setattr(api, "_sessions", {})
+@pytest.fixture
+def runtime():
+    return InferenceRuntime(FakePredictor())
 
 
-def upload(data, content_type):
-    return UploadFile(
-        BytesIO(data),
-        filename="image.png",
-        headers=Headers({"content-type": content_type}),
+@pytest.fixture
+def client(runtime):
+    with TestClient(create_app(runtime)) as client:
+        yield client
+
+
+def create_session(client):
+    response = client.post(
+        "/api/sessions", files={"file": ("image.png", image_bytes(), "image/png")}
     )
+    assert response.status_code == 200, response.text
+    return "/api/sessions/" + response.json()["session_id"]
 
 
-def test_backend_resolves_weights_from_repository_root():
-    assert api.ROOT == Path(__file__).resolve().parents[1]
-    assert (api.ROOT / "weight" / "visual_token.pt").is_file()
+def test_backend_resolves_weights_from_repository_root(monkeypatch):
+    monkeypatch.delenv("SAM3_WEIGHT", raising=False)
+    monkeypatch.delenv("SAM3_VISUAL", raising=False)
+    runtime = InferenceRuntime()
+    assert ROOT == Path(__file__).resolve().parents[1]
+    assert runtime.weight == ROOT / "weight/sam3.1_multiplex.pt"
+    assert runtime.visual == ROOT / "weight/visual_token.pt"
 
 
-def test_session_prompt_and_undo(monkeypatch):
-    setup(monkeypatch)
-    created = api.create_session(upload(image_bytes(), "image/png"))
-
-    session_id = created["session_id"]
-    assert created["width"] == 8
-    assert created["height"] == 6
-
-    prompted = api.add_prompt(
-        session_id,
-        api.Prompt(box=(1, 1, 3, 3), positive=True),
-    )
+def test_session_prompt_and_undo(client):
+    path = create_session(client)
+    prompted = client.post(path + "/prompts", json={"box": [1, 1, 3, 3]}).json()
+    assert prompted["width"] == 8 and prompted["height"] == 6
     assert prompted["prompt_count"] == 1
     assert prompted["objects"][0]["mask"].startswith("data:image/png;base64,")
-
-    undone = api.remove_prompt(session_id)
+    undone = client.delete(path + "/prompts/last").json()
     assert undone["prompt_count"] == 0
 
 
-def test_session_updates_and_deletes_selected_prompt(monkeypatch):
-    setup(monkeypatch)
-    created = api.create_session(upload(image_bytes(), "image/png"))
-    session_id = created["session_id"]
-    api.add_prompt(session_id, api.Prompt(box=(1, 1, 3, 3), positive=True))
-    api.add_prompt(session_id, api.Prompt(box=(4, 1, 6, 3), positive=True))
+def test_undo_validation_error_returns_400(client, runtime, monkeypatch):
+    path = create_session(client)
 
-    updated = api.update_prompt(
-        session_id,
-        0,
-        api.PromptUpdate(box=(0, 0, 2, 2)),
-    )
-    deleted = api.delete_prompt(session_id, 0)
+    def invalid_undo(state):
+        raise ValueError("at least one positive point is required")
 
+    monkeypatch.setattr(runtime._model, "remove_prompt", invalid_undo)
+    response = client.delete(path + "/prompts/last")
+    assert response.status_code == 400
+    assert response.json()["detail"] == "at least one positive point is required"
+
+
+def test_session_updates_and_deletes_selected_prompt(client):
+    path = create_session(client)
+    for box in ([1, 1, 3, 3], [4, 1, 6, 3]):
+        assert client.post(path + "/prompts", json={"box": box}).status_code == 200
+    updated = client.put(path + "/prompts/0", json={"box": [0, 0, 2, 2]}).json()
+    deleted = client.delete(path + "/prompts/0").json()
     assert updated["prompt_count"] == 2
     assert deleted["prompt_count"] == 1
 
 
-def test_session_adds_moves_and_deletes_point_prompt(monkeypatch):
-    setup(monkeypatch)
-    created = api.create_session(upload(image_bytes(), "image/png"))
-    session_id = created["session_id"]
-
-    added = api.add_point(
-        session_id,
-        api.PointPrompt(point=(3, 2), positive=True),
-    )
-    updated = api.update_point(
-        session_id,
-        0,
-        api.PointUpdate(point=(5, 4)),
-    )
-    deleted = api.delete_point(session_id, 0)
-
-    assert added["prompt_count"] == 1
-    assert updated["prompt_count"] == 1
+def test_session_adds_moves_and_deletes_point_prompt(client):
+    path = create_session(client)
+    added = client.post(path + "/points", json={"point": [3, 2]}).json()
+    updated = client.put(path + "/points/0", json={"point": [5, 4]}).json()
+    deleted = client.delete(path + "/points/0").json()
+    assert added["prompt_count"] == updated["prompt_count"] == 1
     assert deleted["prompt_count"] == 0
 
 
-def test_session_clicks_result_to_add_exclude_box(monkeypatch):
-    setup(monkeypatch)
-    created = api.create_session(upload(image_bytes(), "image/png"))
-    session_id = created["session_id"]
-    api.add_prompt(session_id, api.Prompt(box=(0, 0, 4, 4), positive=True))
-
-    excluded = api.exclude_object(session_id, 1)
-
+def test_session_clicks_result_to_add_exclude_box(client, runtime):
+    path = create_session(client)
+    client.post(path + "/prompts", json={"box": [0, 0, 4, 4]})
+    excluded = client.post(path + "/objects/1/exclude").json()
     assert excluded["prompt_count"] == 2
-    assert api._sessions[session_id]["state"]["box_labels"] == [1, 0]
-    assert api._sessions[session_id]["state"]["boxes"][-1] == (1, 1, 3, 3)
+    state = runtime._sessions[excluded["session_id"]].state
+    assert state["box_labels"] == [1, 0]
+    assert tuple(state["boxes"][-1]) == (1, 1, 3, 3)
 
 
-def test_session_refines_current_results(monkeypatch):
-    setup(monkeypatch)
-    created = api.create_session(upload(image_bytes(), "image/png"))
-    session_id = created["session_id"]
-    api.add_prompt(session_id, api.Prompt(box=(0, 0, 4, 4), positive=True))
-
-    refined = api.refine_results(session_id)
-    repeated = api.refine_results(session_id)
-
+def test_session_refines_current_results(client, runtime):
+    path = create_session(client)
+    client.post(path + "/prompts", json={"box": [0, 0, 4, 4]})
+    refined = client.post(path + "/refine").json()
+    repeated = client.post(path + "/refine").json()
     assert refined["objects"][0]["metrics"]["refine_score"] == pytest.approx(0.95)
     assert repeated == refined
-    assert api._predictor.refine_calls == 2
+    assert runtime._model.refine_calls == 2
 
 
-def test_session_deletes_multiple_selected_points(monkeypatch):
-    setup(monkeypatch)
-    created = api.create_session(upload(image_bytes(), "image/png"))
-    session_id = created["session_id"]
-    for point in ((1, 1), (3, 2), (5, 4)):
-        api.add_point(session_id, api.PointPrompt(point=point, positive=True))
-
-    deleted = api.delete_points(
-        session_id,
-        api.PointDelete(indices=[0, 2]),
-    )
-
+def test_session_deletes_multiple_selected_points(client):
+    path = create_session(client)
+    for point in ([1, 1], [3, 2], [5, 4]):
+        client.post(path + "/points", json={"point": point})
+    deleted = client.post(path + "/points/delete", json={"indices": [0, 2]}).json()
     assert deleted["prompt_count"] == 1
 
 
-def test_uploading_another_image_keeps_existing_session(monkeypatch):
-    setup(monkeypatch)
-    first = api.create_session(upload(image_bytes(), "image/png"))
-    api.create_session(upload(image_bytes(), "image/png"))
-
-    prompted = api.add_point(
-        first["session_id"],
-        api.PointPrompt(point=(3, 2), positive=True),
-    )
-
+def test_uploading_another_image_keeps_existing_session(client):
+    first = create_session(client)
+    create_session(client)
+    prompted = client.post(first + "/points", json={"point": [3, 2]}).json()
     assert prompted["prompt_count"] == 1
 
 
-def test_session_rejects_non_image_upload(monkeypatch):
-    setup(monkeypatch)
-
-    with pytest.raises(HTTPException) as error:
-        api.create_session(upload(b"hello", "text/plain"))
-
-    assert error.value.status_code == 415
+def test_session_limit_evicts_oldest_image(client):
+    paths = [create_session(client) for _ in range(9)]
+    assert client.delete(paths[0] + "/prompts/last").status_code == 404
+    assert client.delete(paths[1] + "/prompts/last").status_code == 200
 
 
-def test_oversized_image_is_rejected_before_decoding(monkeypatch):
-    setup(monkeypatch)
+def test_app_instances_have_separate_sessions_and_release_runtime():
+    first, second = InferenceRuntime(FakePredictor()), InferenceRuntime(FakePredictor())
+    with TestClient(create_app(first)) as a, TestClient(create_app(second)) as b:
+        path = create_session(a)
+        assert a.get("/api/health").json()["model_loaded"] is True
+        assert b.delete(path + "/prompts/last").status_code == 404
+    assert not first.model_loaded and not second.model_loaded
+    assert not first._sessions and not second._sessions
+
+
+def test_missing_model_returns_503(monkeypatch):
+    monkeypatch.setenv("SAM3_WEIGHT", "does-not-exist.pt")
+    with TestClient(create_app()) as client:
+        response = client.post(
+            "/api/sessions", files={"file": ("image.png", image_bytes(), "image/png")}
+        )
+    assert response.status_code == 503
+
+
+def test_unknown_session_and_object_return_404(client):
+    assert (
+        client.post("/api/sessions/absent/points", json={"point": [1, 1]}).status_code
+        == 404
+    )
+    path = create_session(client)
+    assert client.post(path + "/objects/500/exclude").status_code == 404
+
+
+def test_schema_and_model_errors_are_http_errors(client):
+    path = create_session(client)
+    assert client.post(path + "/points", json={"point": [1]}).status_code == 422
+    assert client.put(path + "/points/9", json={"point": [1, 1]}).status_code == 400
+
+
+def test_session_rejects_non_image_upload(client):
+    response = client.post(
+        "/api/sessions", files={"file": ("text.txt", b"hello", "text/plain")}
+    )
+    assert response.status_code == 415
+
+
+def test_oversized_image_is_rejected_before_decoding(client, monkeypatch):
     raw = image_bytes()
     monkeypatch.setattr(images, "MAX_PIXELS", 10)
 
     def reject_decode(*args, **kwargs):
-        pytest.fail("image was decoded before its dimensions were checked")
+        pytest.fail("image decoded before dimensions were checked")
 
     monkeypatch.setattr(Image.Image, "convert", reject_decode)
-    with pytest.raises(HTTPException) as error:
-        api.create_session(upload(raw, "image/png"))
+    response = client.post(
+        "/api/sessions", files={"file": ("image.png", raw, "image/png")}
+    )
+    assert response.status_code == 413
 
-    assert error.value.status_code == 413
-    assert api._sessions == {}
 
-
-def test_pillow_decompression_bomb_is_rejected(monkeypatch):
-    setup(monkeypatch)
+def test_pillow_decompression_bomb_is_rejected(client, monkeypatch):
     raw = image_bytes()
     monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 10)
-
-    with pytest.raises(HTTPException) as error:
-        api.create_session(upload(raw, "image/png"))
-
-    assert error.value.status_code == 413
-    assert api._sessions == {}
+    response = client.post(
+        "/api/sessions", files={"file": ("image.png", raw, "image/png")}
+    )
+    assert response.status_code == 413
 
 
 def test_upload_byte_limit_precedes_image_parsing(monkeypatch):
-    setup(monkeypatch)
     monkeypatch.setattr(images, "MAX_BYTES", 2)
-    file = upload(b"not an image", "image/png")
-
+    file = UploadFile(
+        BytesIO(b"not an image"),
+        filename="image.png",
+        headers=Headers({"content-type": "image/png"}),
+    )
     with pytest.raises(HTTPException) as error:
-        api.create_session(file)
-
+        images.read_image(file)
     assert error.value.status_code == 413
     assert file.file.tell() == 3
 
 
-def test_invalid_image_returns_decode_error(monkeypatch):
-    setup(monkeypatch)
-    with pytest.raises(HTTPException) as error:
-        api.create_session(upload(b"not an image", "image/png"))
-    assert error.value.status_code == 400
+def test_invalid_image_returns_decode_error(client):
+    response = client.post(
+        "/api/sessions", files={"file": ("image.png", b"not an image", "image/png")}
+    )
+    assert response.status_code == 400
 
 
 def test_mask_response_preserves_pixels_and_fields():
@@ -282,8 +291,7 @@ def test_mask_response_preserves_pixels_and_fields():
         [{"object_id": 7, "box": (1, 2, 3, 4), "roi": roi, "metrics": metrics}]
     )[0]
     assert set(result) == {"object_id", "box", "mask", "color", "metrics"}
-    assert result["object_id"] == 7
-    assert result["box"] == [1, 2, 3, 4]
+    assert result["object_id"] == 7 and result["box"] == [1, 2, 3, 4]
     assert result["metrics"] == metrics
     rgba = np.array(Image.open(BytesIO(base64.b64decode(result["mask"].split(",")[1]))))
     np.testing.assert_array_equal(rgba[..., 3], roi.astype(np.uint8) * 132)

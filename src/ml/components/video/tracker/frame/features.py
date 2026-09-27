@@ -34,7 +34,6 @@ def forward_image(
         need_interactive_out=need_interactive_out,
         need_propagation_out=need_propagation_out,
     )
-    clone_backbone_tensors(self, backbone_out)
     return backbone_out
 
 
@@ -63,20 +62,6 @@ def project_neck_features(neck_out, decoder):
     neck_out["backbone_fpn"][1].tensors = decoder.conv_s1(
         neck_out["backbone_fpn"][1].tensors
     )
-
-
-def clone_backbone_tensors(self, backbone_out):
-    for neck_out in backbone_out.values():
-        if not isinstance(neck_out, dict) or "backbone_fpn" not in neck_out:
-            continue
-
-        for idx in range(len(neck_out["backbone_fpn"])):
-            neck_out["backbone_fpn"][idx].tensors = self._maybe_clone(
-                neck_out["backbone_fpn"][idx].tensors
-            )
-            neck_out["vision_pos_enc"][idx] = self._maybe_clone(
-                neck_out["vision_pos_enc"][idx]
-            )
 
 
 def prepare_backbone_features(self, backbone_out):

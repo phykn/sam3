@@ -1,4 +1,5 @@
 import torch
+from timm.layers import trunc_normal_
 from torch import nn
 
 from ...blocks.video.features import VideoFeatures
@@ -20,101 +21,124 @@ from ...components.video.tracker.multiplex.state import MultiplexController
 from ...components.video.tracker.runtime import step as runtime_step
 from . import masks, objects, propagate
 from .heads import build_sam_heads
-from .init import init_tracking_model
 from .state import add_object, create_state
 
 IMAGE_SIZE = 1008
 BACKBONE_STRIDE = 14
 
 
-def runtime_config(features, memory, tracking, multiplex_controller):
-    return {
-        "backbone": features,
-        "transformer": tracking.transformer,
-        "maskmem_backbone": memory.encoder,
-        "image_pe_layer": tracking.image_pe,
-        "sam_mask_decoder": tracking.mask_decoder,
-        "output_valid_embed": tracking.output_valid_embed,
-        "output_invalid_embed": tracking.output_invalid_embed,
-        "multiplex_controller": multiplex_controller,
-        "num_maskmem": 7,
-        "image_size": IMAGE_SIZE,
-        "backbone_stride": BACKBONE_STRIDE,
-        "apply_sigmoid_to_mask_logits_for_mem_enc": True,
-        "sigmoid_scale_for_mem_enc": 2.0,
-        "sigmoid_bias_for_mem_enc": -1.0,
-        "use_mask_input_as_output_without_sam": True,
-        "max_cond_frames_in_attn": 4,
-        "keep_first_cond_frame": False,
-        "add_all_frames_to_correct_as_cond": False,
-        "directly_add_no_mem_embed": True,
-        "use_high_res_features_in_sam": True,
-        "multimask_output_in_sam": True,
-        "multimask_min_pt_num": 0,
-        "multimask_max_pt_num": 1,
-        "multimask_output_for_tracking": True,
-        "use_best_iou_mask_for_mem_enc": False,
-        "iou_prediction_use_sigmoid": False,
-        "memory_temporal_stride_for_eval": 1,
-        "non_overlap_masks_for_mem_enc": False,
-        "use_obj_ptrs_in_encoder": True,
-        "max_obj_ptrs_in_encoder": 16,
-        "add_tpos_enc_to_obj_ptrs": True,
-        "proj_tpos_enc_in_obj_ptrs": True,
-        "use_signed_tpos_enc_to_obj_ptrs": False,
-        "only_obj_ptrs_in_the_past_for_eval": False,
-        "pred_obj_scores": True,
-        "pred_obj_scores_mlp": True,
-        "fixed_no_obj_ptr": True,
-        "use_no_obj_ptr": True,
-        "use_mlp_for_obj_ptr_proj": True,
-        "use_linear_no_obj_ptr": True,
-        "no_obj_embed_spatial": True,
-        "sincos_tpos_enc": True,
-        "sam_mask_decoder_extra_args": {
-            "dynamic_multimask_via_stability": True,
-            "dynamic_multimask_stability_delta": 0.05,
-            "dynamic_multimask_stability_thresh": 0.98,
-        },
-        "save_image_features": True,
-        "num_multimask_outputs": NUM_MULTIMASK_OUTPUTS,
-        "decode_mask_with_shared_tokens": False,
-        "decode_mask_attribute_with_shared_tokens": False,
-        "share_necks": False,
-        "add_output_suppression_embeddings": True,
-        "add_object_conditional_embeddings": False,
-        "add_object_unconditional_embeddings": None,
-        "condition_as_mask_input": True,
-        "condition_as_mask_input_fg": 1.0,
-        "condition_as_mask_input_bg": 0.0,
-        "use_maskmem_tpos_v2": True,
-        "use_memory_selection": False,
-        "mf_threshold": 0.01,
-        "object_score_logit_threshold": 0.0,
-        "stability_score_attentuation": False,
-    }
-
-
 class VideoRuntime(nn.Module):
     def __init__(self, features, memory, tracking, multiplex_controller):
         super().__init__()
-        init_tracking_model(
-            self,
-            runtime_config(
-                features,
-                memory,
-                tracking,
-                multiplex_controller,
-            ),
+        self.backbone = features
+        self.use_high_res_features_in_sam = True
+        self.num_feature_levels = 3
+        self.use_obj_ptrs_in_encoder = True
+        self.max_obj_ptrs_in_encoder = 16
+        self.interactive_mask_downsample = nn.Conv2d(1, 1, kernel_size=4, stride=4)
+        self.multiplex_controller = multiplex_controller
+        self.save_image_features = True
+        self.multiplex_count = multiplex_controller.multiplex_count
+
+        assert (
+            tracking.transformer.decoder is None
+        ), "transformer should be encoder-only"
+        self.transformer = tracking.transformer
+        self.hidden_dim = self.transformer.d_model
+        self.maskmem_backbone = memory.encoder
+        self.mem_dim = self.hidden_dim
+        if hasattr(self.maskmem_backbone, "out_proj") and hasattr(
+            self.maskmem_backbone.out_proj, "weight"
+        ):
+            assert (
+                self.maskmem_backbone.out_proj.weight.shape[0] == self.hidden_dim
+            ), "there should be no compression of memory embeddings"
+        self.num_maskmem = 7
+        self.sincos_tpos_enc = True
+        self.use_maskmem_tpos_v2 = True
+        self.maskmem_tpos_enc = nn.Parameter(
+            torch.zeros(self.num_maskmem, 1, 1, self.mem_dim)
         )
+        trunc_normal_(self.maskmem_tpos_enc, std=0.02)
+        self.interactivity_no_mem_embed = nn.Parameter(
+            torch.zeros(1, 1, self.hidden_dim)
+        )
+        trunc_normal_(self.interactivity_no_mem_embed, std=0.02)
+        self.directly_add_no_mem_embed = True
+
+        self.pred_obj_scores = True
+        self.pred_obj_scores_mlp = True
+        self.fixed_no_obj_ptr = True
+        self.use_no_obj_ptr = True
+        self.use_linear_no_obj_ptr = True
+        self.no_obj_ptr_linear = nn.Linear(self.hidden_dim, self.hidden_dim)
+        self.use_mlp_for_obj_ptr_proj = True
+        self.no_obj_embed_spatial = nn.Parameter(
+            torch.zeros(self.multiplex_count, self.hidden_dim)
+        )
+        trunc_normal_(self.no_obj_embed_spatial, std=0.02)
+        self.add_output_suppression_embeddings = True
+        self.output_valid_embed = tracking.output_valid_embed
+        self.output_invalid_embed = tracking.output_invalid_embed
+        self.add_object_conditional_embeddings = False
+        self.add_object_unconditional_embeddings = False
+        self.condition_as_mask_input = True
+        self.condition_as_mask_input_fg = 1.0
+        self.condition_as_mask_input_bg = 0.0
+
+        self.image_size = IMAGE_SIZE
+        self.backbone_stride = BACKBONE_STRIDE
+        self.low_res_mask_size = self.image_size // self.backbone_stride * 4
+        self.input_mask_size = self.low_res_mask_size * 4
+        self.add_tpos_enc_to_obj_ptrs = True
+        self.proj_tpos_enc_in_obj_ptrs = True
+        self.use_signed_tpos_enc_to_obj_ptrs = False
+        self.only_obj_ptrs_in_the_past_for_eval = False
+        self.apply_sigmoid_to_mask_logits_for_mem_enc = True
+        self.sigmoid_scale_for_mem_enc = 2.0
+        self.sigmoid_bias_for_mem_enc = -1.0
+        self.binarize_mask_from_pts_for_mem_enc = False
+        self.non_overlap_masks_for_mem_enc = False
+        self.memory_temporal_stride_for_eval = 1
+        self.use_mask_input_as_output_without_sam = True
+        self.multimask_output_in_sam = True
+        self.multimask_min_pt_num = 0
+        self.multimask_max_pt_num = 1
+        self.multimask_output_for_tracking = True
+        self.use_best_iou_mask_for_mem_enc = False
+        self.iou_prediction_use_sigmoid = False
+        self.object_score_logit_threshold = 0.0
+        self.stability_score_attentuation = False
+        self.iter_use_prev_mask_pred = False
+        self.interactive_sam_mask_decoder_extra_args = {
+            "dynamic_multimask_via_stability": True,
+            "dynamic_multimask_stability_delta": 0.05,
+            "dynamic_multimask_stability_thresh": 0.98,
+        }
+        self.sam_mask_decoder_extra_args = {
+            **self.interactive_sam_mask_decoder_extra_args,
+            "dynamic_multimask_via_stability": False,
+        }
+        self.num_multimask_outputs = NUM_MULTIMASK_OUTPUTS
+        self.decode_mask_with_shared_tokens = False
+        self.decode_mask_attribute_with_shared_tokens = False
+        self.share_necks = False
+        self.offload_output_to_cpu_for_eval = False
+        self.trim_past_non_cond_mem_for_eval = False
+        self.max_cond_frames_in_attn = 4
+        self.keep_first_cond_frame = False
+        self.add_all_frames_to_correct_as_cond = False
+        self.use_memory_selection = False
+        self.mf_threshold = 0.01
+        self.is_dynamic_model = True
+        self.image_pe_layer = tracking.image_pe
+        self.sam_mask_decoder = tracking.mask_decoder
+        build_sam_heads(self)
         self.clear_non_cond_mem_around_input = False
         self.clear_non_cond_mem_for_multi_obj = False
         self.fill_hole_area = 0
         self.always_start_from_first_ann_frame = False
         self.non_overlap_masks_for_output = True
-
-    def _build_sam_heads(self):
-        return build_sam_heads(self)
 
     def _get_interactive_pix_mem(self, *args, **kwargs):
         return frame_features.get_interactive_pix_mem(self, *args, **kwargs)
@@ -147,9 +171,6 @@ class VideoRuntime(nn.Module):
 
     def score_memory(self, *args, **kwargs):
         return frame_output.score_memory(self, *args, **kwargs)
-
-    def _maybe_clone(self, value):
-        return value
 
     def add_new_masks_to_existing_state(self, *args, **kwargs):
         return dynamic_masks.add_new_masks_to_existing_state(self, *args, **kwargs)

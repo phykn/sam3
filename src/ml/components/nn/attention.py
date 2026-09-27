@@ -6,6 +6,8 @@ import torch.nn.functional as F
 from torch import nn, Tensor
 from torch.overrides import handle_torch_function, has_torch_function
 
+from ...runtime.checkpointing import activation_checkpoint
+
 
 def multi_head_attention_forward(
     query: Tensor,
@@ -75,9 +77,10 @@ def multi_head_attention_forward(
             static_k=static_k,
             static_v=static_v,
             average_attn_weights=average_attn_weights,
+            attn_bias=attn_bias,
         )
 
-    is_batched = True
+    is_batched = query.dim() == 3
 
     if is_causal:
         raise NotImplementedError("is_causal is not supported in this implem")
@@ -227,11 +230,19 @@ def multi_head_attention_forward(
 
     src_len = k.size(1)
 
+    if attn_mask is not None and attn_mask.dtype == torch.bool:
+        attn_mask = torch.zeros_like(attn_mask, dtype=q.dtype).masked_fill_(
+            attn_mask, float("-inf")
+        )
     if key_padding_mask is not None:
         assert key_padding_mask.shape == (
             bsz,
             src_len,
         ), f"expecting key_padding_mask shape of {(bsz, src_len)}, but got {key_padding_mask.shape}"
+        if key_padding_mask.dtype == torch.bool:
+            key_padding_mask = torch.zeros_like(
+                key_padding_mask, dtype=q.dtype
+            ).masked_fill_(key_padding_mask, float("-inf"))
         key_padding_mask = (
             key_padding_mask.view(bsz, 1, 1, src_len)
             .expand(-1, num_heads, -1, -1)
@@ -239,15 +250,8 @@ def multi_head_attention_forward(
         )
         if attn_mask is None:
             attn_mask = key_padding_mask
-        elif attn_mask.dtype == torch.bool:
-            attn_mask = attn_mask.logical_or(key_padding_mask)
         else:
-            attn_mask = attn_mask.masked_fill(key_padding_mask, float("-inf"))
-
-    if attn_mask is not None and attn_mask.dtype == torch.bool:
-        new_attn_mask = torch.zeros_like(attn_mask, dtype=q.dtype)
-        new_attn_mask.masked_fill_(attn_mask, float("-inf"))
-        attn_mask = new_attn_mask
+            attn_mask = attn_mask + key_padding_mask
 
     if not training:
         dropout_p = 0.0
@@ -277,14 +281,28 @@ def multi_head_attention_forward(
     torch.backends.cuda.enable_flash_sdp(True)
     torch.backends.cuda.enable_math_sdp(True)
     torch.backends.cuda.enable_mem_efficient_sdp(True)
-    attn_output = F.scaled_dot_product_attention(
-        q,
-        k,
-        v,
-        attn_mask,
-        dropout_p,
-        is_causal,
-    )
+    if need_weights:
+        attn_output_weights = (q * head_dim**-0.5) @ k.transpose(-2, -1)
+        if attn_mask is not None:
+            attn_output_weights = attn_output_weights + attn_mask
+        fully_masked = torch.isneginf(attn_output_weights).all(dim=-1, keepdim=True)
+        attn_output_weights = (
+            attn_output_weights.masked_fill(fully_masked, 0)
+            .softmax(dim=-1)
+            .masked_fill(fully_masked, 0)
+            .to(v.dtype)
+        )
+        attn_output_weights = F.dropout(attn_output_weights, p=dropout_p)
+        attn_output = attn_output_weights @ v
+    else:
+        attn_output = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            attn_mask,
+            dropout_p,
+            is_causal,
+        )
     attn_output = (
         attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
     )
@@ -293,9 +311,6 @@ def multi_head_attention_forward(
     attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
 
     if need_weights:
-        attn_output_weights = (q * head_dim**-0.5) @ k.transpose(-2, -1)
-        attn_output_weights = attn_output_weights.softmax(dim=-1)
-        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
         if average_attn_weights:
             attn_output_weights = attn_output_weights.sum(dim=1) / num_heads
 
@@ -438,108 +453,33 @@ class MultiheadAttention(nn.Module):
             else:
                 query, key, value = [x.transpose(1, 0) for x in (query, key, value)]
 
-        if not self._qkv_same_embed_dim:
-            if self.use_act_checkpoint:
-                attn_output, attn_output_weights = torch.utils.checkpoint.checkpoint(
-                    multi_head_attention_forward,
-                    query,
-                    key,
-                    value,
-                    self.embed_dim,
-                    self.num_heads,
-                    self.in_proj_weight,
-                    self.in_proj_bias,
-                    self.bias_k,
-                    self.bias_v,
-                    self.add_zero_attn,
-                    self.dropout,
-                    self.out_proj.weight,
-                    self.out_proj.bias,
-                    use_reentrant=False,
-                    training=self.training,
-                    key_padding_mask=key_padding_mask,
-                    need_weights=need_weights,
-                    attn_mask=attn_mask,
-                    use_separate_proj_weight=True,
-                    q_proj_weight=self.q_proj_weight,
-                    k_proj_weight=self.k_proj_weight,
-                    v_proj_weight=self.v_proj_weight,
-                    average_attn_weights=average_attn_weights,
-                    attn_bias=attn_bias,
-                )
-            else:
-                attn_output, attn_output_weights = multi_head_attention_forward(
-                    query,
-                    key,
-                    value,
-                    self.embed_dim,
-                    self.num_heads,
-                    self.in_proj_weight,
-                    self.in_proj_bias,
-                    self.bias_k,
-                    self.bias_v,
-                    self.add_zero_attn,
-                    self.dropout,
-                    self.out_proj.weight,
-                    self.out_proj.bias,
-                    training=self.training,
-                    key_padding_mask=key_padding_mask,
-                    need_weights=need_weights,
-                    attn_mask=attn_mask,
-                    use_separate_proj_weight=True,
-                    q_proj_weight=self.q_proj_weight,
-                    k_proj_weight=self.k_proj_weight,
-                    v_proj_weight=self.v_proj_weight,
-                    average_attn_weights=average_attn_weights,
-                    attn_bias=attn_bias,
-                )
-        else:
-            if self.use_act_checkpoint:
-                attn_output, attn_output_weights = torch.utils.checkpoint.checkpoint(
-                    multi_head_attention_forward,
-                    query,
-                    key,
-                    value,
-                    self.embed_dim,
-                    self.num_heads,
-                    self.in_proj_weight,
-                    self.in_proj_bias,
-                    self.bias_k,
-                    self.bias_v,
-                    self.add_zero_attn,
-                    self.dropout,
-                    self.out_proj.weight,
-                    self.out_proj.bias,
-                    use_reentrant=False,
-                    training=self.training,
-                    key_padding_mask=key_padding_mask,
-                    need_weights=need_weights,
-                    attn_mask=attn_mask,
-                    average_attn_weights=average_attn_weights,
-                    attn_bias=attn_bias,
-                )
-            else:
-                attn_output, attn_output_weights = multi_head_attention_forward(
-                    query,
-                    key,
-                    value,
-                    self.embed_dim,
-                    self.num_heads,
-                    self.in_proj_weight,
-                    self.in_proj_bias,
-                    self.bias_k,
-                    self.bias_v,
-                    self.add_zero_attn,
-                    self.dropout,
-                    self.out_proj.weight,
-                    self.out_proj.bias,
-                    training=self.training,
-                    key_padding_mask=key_padding_mask,
-                    need_weights=need_weights,
-                    attn_mask=attn_mask,
-                    average_attn_weights=average_attn_weights,
-                    attn_bias=attn_bias,
-                )
+        attn_output, attn_output_weights = activation_checkpoint(
+            multi_head_attention_forward,
+            query,
+            key,
+            value,
+            self.embed_dim,
+            self.num_heads,
+            self.in_proj_weight,
+            self.in_proj_bias,
+            self.bias_k,
+            self.bias_v,
+            self.add_zero_attn,
+            self.dropout,
+            self.out_proj.weight,
+            self.out_proj.bias,
+            enabled=self.use_act_checkpoint,
+            training=self.training,
+            key_padding_mask=key_padding_mask,
+            need_weights=need_weights,
+            attn_mask=attn_mask,
+            use_separate_proj_weight=not self._qkv_same_embed_dim,
+            q_proj_weight=self.q_proj_weight,
+            k_proj_weight=self.k_proj_weight,
+            v_proj_weight=self.v_proj_weight,
+            average_attn_weights=average_attn_weights,
+            attn_bias=attn_bias,
+        )
         if self.batch_first and is_batched:
             return attn_output.transpose(1, 0), attn_output_weights
         else:

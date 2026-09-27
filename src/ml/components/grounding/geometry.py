@@ -3,7 +3,7 @@ import torch.nn as nn
 import torchvision
 
 from ....ops.box import cxcywh_to_xyxy
-from ...runtime.checkpointing import activation_ckpt_wrapper
+from ...runtime.checkpointing import activation_checkpoint
 from ..nn.layers import clone_modules
 from .prompt import Prompt
 from .sequence import concat_padded_sequences
@@ -298,12 +298,13 @@ class SequenceGeometryEncoder(nn.Module):
             return embeds
 
         for layer in self.encode:
-            embeds = activation_ckpt_wrapper(layer)(
+            embeds = activation_checkpoint(
+                layer,
                 tgt=embeds,
                 memory=img_feats,
                 tgt_key_padding_mask=mask,
                 pos=img_pos_embeds,
-                act_ckpt_enable=self.training and self.use_act_ckpt,
+                enabled=self.training and self.use_act_ckpt,
             )
         return self.encode_norm(embeds)
 

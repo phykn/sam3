@@ -143,9 +143,7 @@ def run_interactive_sam(
         boxes=None,
         masks=sam_mask_prompt,
     )
-    sparse_embeddings = self._maybe_clone(sparse_embeddings)
-    dense_embeddings = self._maybe_clone(dense_embeddings)
-    image_pe = self._maybe_clone(self.interactive_sam_prompt_encoder.get_dense_pe())
+    image_pe = self.interactive_sam_prompt_encoder.get_dense_pe()
     return self.interactive_sam_mask_decoder(
         image_embeddings=backbone_features,
         image_pe=image_pe,
@@ -195,7 +193,7 @@ def run_propagation_sam(
     assert high_res_features is not None
     assert multiplex_state is not None
 
-    image_pe = self._maybe_clone(propagation_dense_pe(self))
+    image_pe = propagation_dense_pe(self)
     out = self.sam_mask_decoder(
         image_embeddings=backbone_features,
         image_pe=image_pe,
@@ -235,10 +233,10 @@ def output_suppression_embeddings(self, multiplex_state):
 def clone_sam_outputs(self, sam_out):
     low_res_multimasks, ious, sam_output_tokens, object_score_logits = sam_out
     return (
-        self._maybe_clone(low_res_multimasks),
-        self._maybe_clone(ious),
-        self._maybe_clone(sam_output_tokens),
-        self._maybe_clone(object_score_logits),
+        low_res_multimasks,
+        ious,
+        sam_output_tokens,
+        object_score_logits,
     )
 
 

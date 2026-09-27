@@ -68,9 +68,9 @@ def prepare_memory_mask(self, pred_masks_high_res, is_mask_from_pts):
     if not self.apply_sigmoid_to_mask_logits_for_mem_enc:
         return pred_masks_high_res
 
-    assert not self.binarize_mask_from_pts_for_mem_enc, (
-        "haven't been trained this way; beware of hardcoded config override"
-    )
+    assert (
+        not self.binarize_mask_from_pts_for_mem_enc
+    ), "haven't been trained this way; beware of hardcoded config override"
     binarize = self.binarize_mask_from_pts_for_mem_enc and is_mask_from_pts
     if binarize and not self.training:
         mask_for_mem = (pred_masks_high_res > 0).float()
@@ -130,8 +130,8 @@ def run_maskmem_backbone(self, image, pix_feat, mux_mask_for_mem):
     else:
         maskmem_out = self.maskmem_backbone(image, pix_feat, mux_mask_for_mem)
 
-    maskmem_features = self._maybe_clone(maskmem_out["vision_features"])
-    maskmem_pos_enc = [self._maybe_clone(pos) for pos in maskmem_out["vision_pos_enc"]]
+    maskmem_features = maskmem_out["vision_features"]
+    maskmem_pos_enc = list(maskmem_out["vision_pos_enc"])
     return maskmem_features, maskmem_pos_enc
 
 

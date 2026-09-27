@@ -18,7 +18,7 @@ from ...components.transformer.encoder import (
     TransformerEncoderLayer,
 )
 from ...components.transformer.model import Transformer
-from ...runtime.checkpointing import activation_ckpt_wrapper
+from ...runtime.checkpointing import activation_checkpoint
 
 MODEL_DIM = 256
 FEEDFORWARD_DIM = 2048
@@ -255,12 +255,13 @@ class GroundingDecoder(nn.Module):
     def predict_masks(self, out, image, hs, prompt, prompt_mask):
         apply_dac = self.transformer.decoder.dac and self.training
         num_o2o, _ = count_queries(hs, apply_dac)
-        seg = activation_ckpt_wrapper(self.seg_head)(
+        seg = activation_checkpoint(
+            self.seg_head,
             backbone_feats=image["backbone_fpn"],
             obj_queries=hs,
             image_ids=torch.arange(hs.shape[1], device=hs.device),
             encoder_hidden_states=out["encoder_hidden_states"],
-            act_ckpt_enable=self.training,
+            enabled=self.training,
             prompt=prompt,
             prompt_mask=prompt_mask,
         )

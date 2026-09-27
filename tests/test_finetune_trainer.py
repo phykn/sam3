@@ -391,3 +391,36 @@ def test_trainer_stops_all_ranks_before_nonfinite_backward(monkeypatch, tmp_path
     with pytest.raises(FloatingPointError, match="non-finite"):
         trainer.train_step()
     trainer.close()
+
+
+@pytest.mark.parametrize("clip_grad_norm", [None, 1.0])
+def test_nonfinite_gradient_does_not_update_or_save(tmp_path, clip_grad_norm):
+    class UnstableModel(TinyFinetuneModel):
+        def forward(self, batch):
+            out = super().forward(batch)
+            out["iou_scores"] = out["iou_scores"] + self.scale.sqrt()
+            return out
+
+    model = UnstableModel()
+    before = {key: value.detach().clone() for key, value in model.state_dict().items()}
+    trainer = FinetuneTrainer(
+        model=model,
+        train_loader=[make_batch()],
+        valid_loader=[make_batch()],
+        optimizer=torch.optim.AdamW(model.parameters()),
+        steps=1,
+        valid_steps=1,
+        device="cpu",
+        run_root=tmp_path,
+        clip_grad_norm=clip_grad_norm,
+    )
+    try:
+        with pytest.raises(FloatingPointError, match="non-finite gradient"):
+            trainer.train_step()
+        assert trainer.step == 0
+        assert not (trainer.checkpoint_dir / "last.pt").exists()
+        for key, value in model.state_dict().items():
+            torch.testing.assert_close(value, before[key])
+        assert not trainer.optimizer.state
+    finally:
+        trainer.close()

@@ -1,4 +1,9 @@
-import { PointerEvent as WebPointerEvent, useRef, useState } from 'react';
+import {
+  PointerEvent as WebPointerEvent,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import {
   GestureResponderEvent,
   Image,
@@ -18,8 +23,14 @@ import {
   ResultObject,
 } from './types';
 
-type Point = { x: number; y: number };
-type BoxMode = 'move' | 'nw' | 'ne' | 'sw' | 'se';
+import {
+  clamp,
+  imagePosition,
+  moveBox,
+  movePoint,
+  resolveGesture,
+} from './geometry';
+import type { Point, BoxMode } from './geometry';
 type EditState =
   | {
       kind: 'point';
@@ -86,6 +97,13 @@ export function Canvas({
   const gestureStart = useRef<Point | null>(null);
   const editRef = useRef<EditState | null>(null);
 
+  useEffect(() => {
+    gestureStart.current = null;
+    editRef.current = null;
+    setGesture(null);
+    setEdit(null);
+  }, [uri, tool, disabled]);
+
   if (!uri || !imageSize) {
     return (
       <View style={styles.empty}>
@@ -99,23 +117,6 @@ export function Canvas({
       </View>
     );
   }
-
-  const clamp = (value: Point): Point => {
-    const size = layoutRef.current;
-    return {
-      x: Math.max(0, Math.min(size.width, value.x)),
-      y: Math.max(0, Math.min(size.height, value.y)),
-    };
-  };
-
-  const toImage = (value: Point): PromptPoint => {
-    const size = layoutRef.current;
-    const point = clamp(value);
-    return [
-      Math.round((point.x / size.width) * imageSize.width),
-      Math.round((point.y / size.height) * imageSize.height),
-    ];
-  };
 
   const boxStyle = (box: Box) => ({
     left: `${(box[0] / imageSize.width) * 100}%` as `${number}%`,
@@ -155,19 +156,18 @@ export function Canvas({
   };
 
   const imagePoint = (event: WebPointerEvent<HTMLDivElement>): PromptPoint => {
-    const canvas = event.currentTarget.closest(
-      '[aria-label="Prompt canvas"]',
-    );
+    const canvas = event.currentTarget.closest('[aria-label="Prompt canvas"]');
     if (!canvas) return [0, 0];
     const bounds = canvas.getBoundingClientRect();
-    return [
-      ((event.clientX - bounds.left) / bounds.width) * imageSize.width,
-      ((event.clientY - bounds.top) / bounds.height) * imageSize.height,
-    ];
+    return imagePosition(
+      { x: event.clientX - bounds.left, y: event.clientY - bounds.top },
+      bounds,
+      imageSize,
+    );
   };
 
   const beginGesture = (point: Point) => {
-    const value = clamp(point);
+    const value = clamp(point, layoutRef.current);
     gestureStart.current = value;
     if (tool !== 'point') setGesture({ start: value, end: value });
   };
@@ -175,7 +175,10 @@ export function Canvas({
   const moveGesture = (point: Point) => {
     if (!gestureStart.current) return;
     if (tool !== 'point') {
-      setGesture({ start: gestureStart.current, end: clamp(point) });
+      setGesture({
+        start: gestureStart.current,
+        end: clamp(point, layoutRef.current),
+      });
     }
   };
 
@@ -184,48 +187,17 @@ export function Canvas({
     gestureStart.current = null;
     setGesture(null);
     if (!first) return;
-    const last = clamp(point);
-    const moved =
-      Math.abs(last.x - first.x) >= 6 || Math.abs(last.y - first.y) >= 6;
-    if (tool === 'point') {
-      if (!moved) onPoint?.(toImage(last));
-      return;
-    }
-    if (tool === 'box') {
-      if (!moved) return;
-      const start = toImage(first);
-      const end = toImage(last);
-      if (Math.abs(end[0] - start[0]) < 4 || Math.abs(end[1] - start[1]) < 4) {
-        return;
-      }
-      onBox?.([
-        Math.min(start[0], end[0]),
-        Math.min(start[1], end[1]),
-        Math.max(start[0], end[0]),
-        Math.max(start[1], end[1]),
-      ]);
-      return;
-    }
-    if (!moved) {
-      onSelectPrompts?.([]);
-      return;
-    }
-    const x0 = Math.min(first.x, last.x);
-    const y0 = Math.min(first.y, last.y);
-    const x1 = Math.max(first.x, last.x);
-    const y1 = Math.max(first.y, last.y);
-    const size = layoutRef.current;
-    onSelectPrompts?.(
-      prompts.flatMap((item, index) => {
-        const center =
-          item.kind === 'point'
-            ? item.point
-            : ([(item.box[0] + item.box[2]) / 2, (item.box[1] + item.box[3]) / 2] as PromptPoint);
-        const x = (center[0] / imageSize.width) * size.width;
-        const y = (center[1] / imageSize.height) * size.height;
-        return x >= x0 && x <= x1 && y >= y0 && y <= y1 ? [index] : [];
-      }),
+    const action = resolveGesture(
+      tool,
+      first,
+      point,
+      layoutRef.current,
+      imageSize,
+      prompts,
     );
+    if (action?.kind === 'point') onPoint?.(action.point);
+    if (action?.kind === 'box') onBox?.(action.box);
+    if (action?.kind === 'select') onSelectPrompts?.(action.indices);
   };
 
   const beginPointEdit = (
@@ -284,39 +256,23 @@ export function Canvas({
     if (current.kind === 'point') {
       const next: EditState = {
         ...current,
-        point: [
-          Math.max(0, Math.min(imageSize.width - 1, current.original[0] + dx)),
-          Math.max(0, Math.min(imageSize.height - 1, current.original[1] + dy)),
-        ],
+        point: movePoint(current.original, dx, dy, imageSize),
       };
       editRef.current = next;
       setEdit(next);
       return;
     }
 
-    const original = current.original;
-    const minSize = 4;
-    let box: Box;
-    if (current.mode === 'move') {
-      const width = original[2] - original[0];
-      const height = original[3] - original[1];
-      const x0 = Math.max(0, Math.min(imageSize.width - width, original[0] + dx));
-      const y0 = Math.max(0, Math.min(imageSize.height - height, original[1] + dy));
-      box = [x0, y0, x0 + width, y0 + height];
-    } else {
-      let [x0, y0, x1, y1] = original;
-      if (current.mode.includes('w')) x0 = Math.max(0, Math.min(x1 - minSize, x0 + dx));
-      if (current.mode.includes('e')) x1 = Math.min(imageSize.width, Math.max(x0 + minSize, x1 + dx));
-      if (current.mode.includes('n')) y0 = Math.max(0, Math.min(y1 - minSize, y0 + dy));
-      if (current.mode.includes('s')) y1 = Math.min(imageSize.height, Math.max(y0 + minSize, y1 + dy));
-      box = [x0, y0, x1, y1];
-    }
-    const next: EditState = { ...current, box };
+    const next: EditState = {
+      ...current,
+      box: moveBox(current.original, current.mode, dx, dy, imageSize),
+    };
     editRef.current = next;
     setEdit(next);
   };
 
   const finishEdit = (event: WebPointerEvent<HTMLDivElement>) => {
+    moveEdit(event);
     const current = editRef.current;
     if (!current) return;
     event.preventDefault();
@@ -344,7 +300,8 @@ export function Canvas({
     setEdit(null);
   };
 
-  const gestureColor = tool === 'select' ? '#FFFFFF' : positive ? '#4DE0A7' : '#FF6B63';
+  const gestureColor =
+    tool === 'select' ? '#FFFFFF' : positive ? '#4DE0A7' : '#FF6B63';
   const cursor = tool === 'select' ? 'default' : 'crosshair';
 
   return (
@@ -358,7 +315,10 @@ export function Canvas({
       onStartShouldSetResponder={() =>
         Platform.OS !== 'web' && interactive && !disabled
       }
-      style={[styles.canvas, { aspectRatio: imageSize.width / imageSize.height }]}
+      style={[
+        styles.canvas,
+        { aspectRatio: imageSize.width / imageSize.height },
+      ]}
     >
       <Image
         source={{ uri }}
@@ -410,7 +370,11 @@ export function Canvas({
             key={`object-${item.object_id}`}
             style={[styles.overlay, boxStyle(item.box)]}
           >
-            <Image resizeMode="stretch" source={{ uri: item.mask }} style={styles.fill} />
+            <Image
+              resizeMode="stretch"
+              source={{ uri: item.mask }}
+              style={styles.fill}
+            />
             <View style={[styles.resultBox, { borderColor: item.color }]} />
           </View>
         ))}
@@ -485,7 +449,9 @@ export function Canvas({
         )}
       </View>
 
-      {Platform.OS === 'web' && onObject && !disabled &&
+      {Platform.OS === 'web' &&
+        onObject &&
+        !disabled &&
         objects.map((item) => (
           <div
             aria-label={`Exclude result ${item.object_id}`}
@@ -506,7 +472,10 @@ export function Canvas({
           />
         ))}
 
-      {Platform.OS === 'web' && interactive && !disabled && tool === 'select' &&
+      {Platform.OS === 'web' &&
+        interactive &&
+        !disabled &&
+        tool === 'select' &&
         prompts.map((item, index) => {
           if (item.kind === 'point') {
             const point =
@@ -661,8 +630,19 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: 4,
   },
-  promptSign: { width: 10, height: 10, alignItems: 'center', justifyContent: 'center' },
-  promptSignLine: { position: 'absolute', width: 9, height: 2, borderRadius: 1, backgroundColor: '#FFFFFF' },
+  promptSign: {
+    width: 10,
+    height: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  promptSignLine: {
+    position: 'absolute',
+    width: 9,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: '#FFFFFF',
+  },
   promptSignVertical: { transform: [{ rotate: '90deg' }] },
   promptBox: { position: 'absolute', borderWidth: 2.5, borderRadius: 4 },
   boxMark: {
@@ -695,6 +675,11 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     backgroundColor: '#F6F2EA',
   },
-  loadingDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: '#0A9D71' },
+  loadingDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: '#0A9D71',
+  },
   loadingText: { color: '#17202D', fontSize: 13, fontWeight: '700' },
 });

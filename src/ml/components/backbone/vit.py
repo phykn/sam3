@@ -743,7 +743,9 @@ class ViT(nn.Module):
             return num_layers + 1
         elif layer_name.find("ln_pre") != -1:
             return 0
-        elif layer_name.find("pos_embed") != -1 or layer_name.find("cls_token") != -1:
+        elif any(
+            name in layer_name for name in ("pos_embed", "cls_token", "class_embedding")
+        ):
             return 0
         elif layer_name.find("patch_embed") != -1:
             return 0

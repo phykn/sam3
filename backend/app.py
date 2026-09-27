@@ -1,26 +1,21 @@
-import base64
 import os
-from io import BytesIO
 from pathlib import Path
 from threading import Lock
 from uuid import uuid4
 
-import numpy as np
 import torch
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel
 
-from ..predict import GroundPredictor
+from src.predict import GroundPredictor
 
-ROOT = Path(__file__).resolve().parents[2]
+from .images import pack_objects, read_image
+
+ROOT = Path(__file__).resolve().parents[1]
 WEIGHT = Path(os.getenv("SAM3_WEIGHT", ROOT / "weight" / "sam3.1_multiplex.pt"))
 VISUAL = Path(os.getenv("SAM3_VISUAL", ROOT / "weight" / "visual_token.pt"))
 DEVICE = os.getenv("SAM3_DEVICE", "cuda" if torch.cuda.is_available() else "cpu")
-MAX_BYTES = 25 * 1024 * 1024
-MAX_PIXELS = 40_000_000
-COLORS = ("#64D9C2", "#78A7FF", "#F5B95F", "#C995FF", "#FF8A74")
 
 app = FastAPI(title="SAM 3 Similar Object API")
 app.add_middleware(
@@ -80,34 +75,6 @@ def session(session_id):
     return _sessions[session_id]
 
 
-def mask_uri(roi, color):
-    value = np.asarray(roi, dtype=bool)
-    rgba = np.zeros((*value.shape, 4), dtype=np.uint8)
-    rgb = tuple(int(color[index : index + 2], 16) for index in (1, 3, 5))
-    rgba[..., :3] = rgb
-    rgba[..., 3] = value * 132
-    buffer = BytesIO()
-    Image.fromarray(rgba, mode="RGBA").save(buffer, format="PNG")
-    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-    return f"data:image/png;base64,{encoded}"
-
-
-def pack_objects(objects):
-    out = []
-    for index, item in enumerate(objects):
-        color = COLORS[index % len(COLORS)]
-        out.append(
-            {
-                "object_id": item["object_id"],
-                "box": list(item["box"]),
-                "mask": mask_uri(item["roi"], color),
-                "color": color,
-                "metrics": item["metrics"],
-            }
-        )
-    return out
-
-
 def result(data, objects):
     data["objects"] = objects
     return {
@@ -130,18 +97,7 @@ def health():
 
 @app.post("/api/sessions")
 def create_session(file: UploadFile = File(...)):
-    if file.content_type is None or not file.content_type.startswith("image/"):
-        raise HTTPException(415, "upload an image file")
-    raw = file.file.read(MAX_BYTES + 1)
-    if len(raw) > MAX_BYTES:
-        raise HTTPException(413, "image file is too large")
-    try:
-        image = Image.open(BytesIO(raw)).convert("RGB")
-        image.load()
-    except (UnidentifiedImageError, OSError) as error:
-        raise HTTPException(400, "image could not be decoded") from error
-    if image.width * image.height > MAX_PIXELS:
-        raise HTTPException(413, "image dimensions are too large")
+    image = read_image(file)
 
     with _lock:
         try:

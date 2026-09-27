@@ -1,8 +1,8 @@
 # SAM3 Finetune
 
 A local-checkpoint SAM 3.1 rewrite for image segmentation, reference grounding,
-video propagation, and LoRA finetuning. Runtime code lives under `src/` and does
-not depend on Hugging Face.
+video propagation, and LoRA finetuning. Model and training code lives under
+`src/` and does not depend on Hugging Face.
 
 ## Repository
 
@@ -17,6 +17,8 @@ src/finetune/      training loss, resume checkpoints, DDP, and trainer
 src/io/            local base weights and shared trainable-state serialization
 src/ml/            SAM 3.1 components -> workflow blocks -> assembled models
 src/predict/       single-image, grid, grounding, and video predictors
+backend/           FastAPI sessions and image upload/response conversion
+frontend/          React Native Web interface for interactive grounding
 tests/             runtime and mathematical regression tests
 ```
 
@@ -58,6 +60,10 @@ weight/sam3.1_multiplex.pt
 ```
 
 Weights are never downloaded automatically.
+
+For the interactive web interface, start the [backend](backend/README.md) and
+[frontend](frontend/README.md). The API uses CUDA when available and otherwise
+loads the model on CPU.
 
 ## Dataset
 

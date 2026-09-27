@@ -20,12 +20,13 @@ LAYERS = {
     "src.finetune": 5,
     "src.build": 5,
     "src.predict": 5,
+    "backend": 6,
     "scripts": 6,
 }
 
 
 def test_shared_preparation_and_adapters_do_not_import_workflows():
-    banned = ("src.build", "src.predict", "src.finetune", "src.api", "src.data")
+    banned = ("src.build", "src.predict", "src.finetune", "backend", "src.data")
     bad = []
     for folder in ("prepare", "adapt"):
         for path in (ROOT / folder).rglob("*.py"):
@@ -101,7 +102,11 @@ def layer(name: str) -> int | None:
 
 def test_imports_follow_one_way_layers() -> None:
     bad = []
-    paths = list(ROOT.rglob("*.py")) + list((WORKSPACE / "scripts").glob("*.py"))
+    paths = (
+        list(ROOT.rglob("*.py"))
+        + list((WORKSPACE / "backend").rglob("*.py"))
+        + list((WORKSPACE / "scripts").glob("*.py"))
+    )
     for path in paths:
         source_rank = layer(module_name(path))
         if source_rank is None:

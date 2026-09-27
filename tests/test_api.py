@@ -1,10 +1,12 @@
 from io import BytesIO
+from pathlib import Path
 
 import numpy as np
 import pytest
 from fastapi import HTTPException, UploadFile
 from PIL import Image
-from src.api import app as api
+from backend import app as api
+from backend import images
 from starlette.datastructures import Headers
 
 
@@ -95,6 +97,11 @@ def upload(data, content_type):
         filename="image.png",
         headers=Headers({"content-type": content_type}),
     )
+
+
+def test_backend_resolves_weights_from_repository_root():
+    assert api.ROOT == Path(__file__).resolve().parents[1]
+    assert (api.ROOT / "weight" / "visual_token.pt").is_file()
 
 
 def test_session_prompt_and_undo(monkeypatch):
@@ -217,3 +224,67 @@ def test_session_rejects_non_image_upload(monkeypatch):
         api.create_session(upload(b"hello", "text/plain"))
 
     assert error.value.status_code == 415
+
+
+def test_oversized_image_is_rejected_before_decoding(monkeypatch):
+    setup(monkeypatch)
+    raw = image_bytes()
+    monkeypatch.setattr(images, "MAX_PIXELS", 10)
+
+    def reject_decode(*args, **kwargs):
+        pytest.fail("image was decoded before its dimensions were checked")
+
+    monkeypatch.setattr(Image.Image, "convert", reject_decode)
+    with pytest.raises(HTTPException) as error:
+        api.create_session(upload(raw, "image/png"))
+
+    assert error.value.status_code == 413
+    assert api._sessions == {}
+
+
+def test_pillow_decompression_bomb_is_rejected(monkeypatch):
+    setup(monkeypatch)
+    raw = image_bytes()
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 10)
+
+    with pytest.raises(HTTPException) as error:
+        api.create_session(upload(raw, "image/png"))
+
+    assert error.value.status_code == 413
+    assert api._sessions == {}
+
+
+def test_upload_byte_limit_precedes_image_parsing(monkeypatch):
+    setup(monkeypatch)
+    monkeypatch.setattr(images, "MAX_BYTES", 2)
+    file = upload(b"not an image", "image/png")
+
+    with pytest.raises(HTTPException) as error:
+        api.create_session(file)
+
+    assert error.value.status_code == 413
+    assert file.file.tell() == 3
+
+
+def test_invalid_image_returns_decode_error(monkeypatch):
+    setup(monkeypatch)
+    with pytest.raises(HTTPException) as error:
+        api.create_session(upload(b"not an image", "image/png"))
+    assert error.value.status_code == 400
+
+
+def test_mask_response_preserves_pixels_and_fields():
+    import base64
+
+    roi = np.array([[True, False], [False, True]])
+    metrics = {"score": 0.75}
+    result = images.pack_objects(
+        [{"object_id": 7, "box": (1, 2, 3, 4), "roi": roi, "metrics": metrics}]
+    )[0]
+    assert set(result) == {"object_id", "box", "mask", "color", "metrics"}
+    assert result["object_id"] == 7
+    assert result["box"] == [1, 2, 3, 4]
+    assert result["metrics"] == metrics
+    rgba = np.array(Image.open(BytesIO(base64.b64decode(result["mask"].split(",")[1]))))
+    np.testing.assert_array_equal(rgba[..., 3], roi.astype(np.uint8) * 132)
+    np.testing.assert_array_equal(rgba[..., :3], np.tile([100, 217, 194], (2, 2, 1)))

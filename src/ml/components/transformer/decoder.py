@@ -260,17 +260,16 @@ class TransformerDecoder(nn.Module):
             n_input = 4 if boxRPB == "both" else 2
             self.boxRPB_embed_x = MLP(n_input, d_model, nheads, 2)
             self.boxRPB_embed_y = MLP(n_input, d_model, nheads, 2)
-            self.compilable_cord_cache = None
-            self.compilable_stored_size = None
-            self.coord_cache = {}
+            self.coord_cache = None
+            self.coord_size = None
 
             if resolution is not None and stride is not None:
                 feat_size = resolution // stride
                 coords_h, coords_w = self._get_coords(
-                    feat_size, feat_size, device="cuda"
+                    feat_size, feat_size, device=self.query_embed.weight.device
                 )
-                self.compilable_cord_cache = (coords_h, coords_w)
-                self.compilable_stored_size = (feat_size, feat_size)
+                self.coord_cache = (coords_h, coords_w)
+                self.coord_size = (feat_size, feat_size)
 
         self.roi_pooler = (
             RoIAlign(output_size=7, spatial_scale=1, sampling_ratio=-1, aligned=True)
@@ -321,27 +320,16 @@ class TransformerDecoder(nn.Module):
         H, W = feat_size
         boxes_xyxy = cxcywh_to_xyxy(reference_boxes).transpose(0, 1)
         bs, num_queries, _ = boxes_xyxy.shape
-        if self.compilable_cord_cache is None:
-            self.compilable_cord_cache = self._get_coords(H, W, reference_boxes.device)
-            self.compilable_stored_size = (H, W)
-
-        if torch.compiler.is_dynamo_compiling() or self.compilable_stored_size == (
-            H,
-            W,
+        if self.coord_cache is None or (
+            not torch.compiler.is_dynamo_compiling() and self.coord_size != (H, W)
         ):
-            # good, hitting the cache, will be compilable
-            coords_h, coords_w = self.compilable_cord_cache
-        else:
-            # cache miss, will create compilation issue
-            # In case we're not compiling, we'll still rely on the dict-based cache
-            if feat_size not in self.coord_cache:
-                self.coord_cache[feat_size] = self._get_coords(
-                    H, W, reference_boxes.device
-                )
-            coords_h, coords_w = self.coord_cache[feat_size]
-
-            assert coords_h.shape == (H,)
-            assert coords_w.shape == (W,)
+            self.coord_cache = self._get_coords(H, W, reference_boxes.device)
+            self.coord_size = (H, W)
+        # Compiled execution reuses the shape established by the eager warmup.
+        coords_h, coords_w = (
+            coord.to(reference_boxes.device) for coord in self.coord_cache
+        )
+        self.coord_cache = (coords_h, coords_w)
 
         deltas_y = coords_h.view(1, -1, 1) - boxes_xyxy.reshape(-1, 1, 4)[:, :, 1:4:2]
         deltas_y = deltas_y.view(bs, num_queries, -1, 2)

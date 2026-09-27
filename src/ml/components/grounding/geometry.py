@@ -175,8 +175,7 @@ class SequenceGeometryEncoder(nn.Module):
 
             # boxes are [Num_boxes, bs, 4], normalized in [0, 1]
             boxes_xyxy = cxcywh_to_xyxy(boxes)
-            scale = torch.tensor([width, height, width, height], dtype=boxes_xyxy.dtype)
-            scale = scale.pin_memory().to(device=boxes_xyxy.device, non_blocking=True)
+            scale = boxes_xyxy.new_tensor([width, height, width, height])
             scale = scale.view(1, 1, 4)
             boxes_xyxy = boxes_xyxy * scale
             sampled = torchvision.ops.roi_align(

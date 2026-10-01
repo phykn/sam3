@@ -235,3 +235,42 @@ def test_checkpoint_rejects_unsupported_format(tmp_path):
     path, model, optimizer = write_bad_checkpoint(tmp_path, change_format)
     with pytest.raises(ValueError, match="format"):
         load_checkpoint(path, model, optimizer, {})
+
+
+@pytest.mark.parametrize("payload", [None, [], torch.tensor(1)])
+def test_checkpoint_rejects_non_dictionary_payload(tmp_path, payload):
+    path = tmp_path / "bad.pt"
+    torch.save(payload, path)
+    model = TinyModel()
+
+    with pytest.raises(ValueError, match="dictionary"):
+        load_checkpoint(path, model, make_optimizer(model), {})
+
+
+@pytest.mark.parametrize("field", ["model", "optimizer", "config"])
+def test_checkpoint_rejects_invalid_fields_before_restoring(tmp_path, field):
+    def corrupt(data):
+        data["model"] = {name: value + 10 for name, value in data["model"].items()}
+        data[field] = None
+
+    path, model, optimizer = write_bad_checkpoint(tmp_path, corrupt)
+    expected = trainable_state(model)
+    with pytest.raises(ValueError, match=field):
+        load_checkpoint(path, model, optimizer, {})
+
+    for name, value in trainable_state(model).items():
+        torch.testing.assert_close(value, expected[name], rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("value", [None, 1.0, [1.0]])
+def test_non_tensor_state_does_not_restore_parameters(value):
+    model = TinyModel()
+    expected = trainable_state(model)
+    state = {name: tensor + 10 for name, tensor in expected.items()}
+    state["head.bias"] = value
+
+    with pytest.raises(ValueError, match="tensor.*head.bias"):
+        load_trainable_state(model, state)
+
+    for name, tensor in trainable_state(model).items():
+        torch.testing.assert_close(tensor, expected[name], rtol=0, atol=0)

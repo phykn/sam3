@@ -6,6 +6,7 @@ from PIL import Image
 from src.ops.mask import restore_mask
 from src.finetune.checkpoint import FORMAT
 from src.predict.single import SinglePredictor
+from src.prepare.batch import build_prompts
 
 
 class FakePromptEncoder:
@@ -351,3 +352,57 @@ def test_single_predictor_from_finetune_uses_saved_model_config(
             "feature_rank": 6,
         }
     ]
+
+
+def test_finetune_prediction_rejects_invalid_state_before_build(monkeypatch, tmp_path):
+    path = tmp_path / "bad.pt"
+    torch.save({"format": FORMAT, "model": None, "config": {"model": {}}}, path)
+
+    def build(config):
+        raise AssertionError("invalid checkpoint must not construct a model")
+
+    monkeypatch.setattr("src.predict.single.build_finetune_model", build)
+    with pytest.raises(ValueError, match="model"):
+        SinglePredictor.from_finetune("base.pt", path, device="cpu")
+
+
+@pytest.mark.parametrize("kind", ["point", "box", "mixed", "mask"])
+def test_training_and_prediction_build_equivalent_prompt_batches(kind):
+    coords = np.array([[[10, 20]], [[30, 40]]], dtype=np.float32)
+    labels = np.array([[1], [0]], dtype=np.int32)
+    boxes = np.array([[1, 2, 50, 60], [3, 4, 70, 80]], dtype=np.float32)
+    masks = np.stack([np.zeros((288, 288)), np.ones((288, 288))]).astype(np.float32)
+    coords = coords if kind in ("point", "mixed") else None
+    labels = labels if coords is not None else None
+    boxes = boxes if kind in ("box", "mixed") else None
+    masks = masks if kind == "mask" else None
+    items = [
+        {
+            "points": None if coords is None else coords[idx],
+            "point_labels": None if labels is None else labels[idx],
+            "box": None if boxes is None else boxes[idx],
+            "mask": None if masks is None else masks[idx],
+        }
+        for idx in range(2)
+    ]
+    train_points, train_masks = build_prompts(items, 1008, (288, 288), "cpu")
+    model = FakeModel()
+    predictor = SinglePredictor(model, device="cpu")
+    predictor.predict_low(
+        {
+            "orig_hw": (1008, 1008),
+            "image_embed": torch.zeros(1, 256, 2, 2),
+            "high_res": (torch.zeros(1, 32, 8, 8), torch.zeros(1, 64, 4, 4)),
+        },
+        point_coords=coords,
+        point_labels=labels,
+        box=boxes,
+        mask=masks,
+    )
+    predict_points, _, predict_masks = model.prompts[0]
+    for train, predict in zip(train_points, predict_points, strict=True):
+        torch.testing.assert_close(train, predict, rtol=0, atol=0)
+    if train_masks is None:
+        assert predict_masks is None
+    else:
+        torch.testing.assert_close(train_masks, predict_masks, rtol=0, atol=0)

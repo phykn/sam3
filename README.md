@@ -34,6 +34,14 @@ random training augmentation stays in `src/data/`. LoRA computation lives in
 `src/build.py` assembles models and loaders. Training state and optimizer resume
 remain owned by `src/finetune/`.
 
+SAM prompt assembly lives in `src/prepare/prompt.py`: training, single-image
+prediction, and grounding refinement share box/point ordering and mask-only
+padding. `src/prepare/batch.py` batches training prompts. Finetune checkpoint
+reading and trainable-parameter validation live in `src/io/finetune.py`, shared
+by prediction and resume; `src/finetune/checkpoint.py` owns optimizer and resume
+configuration checks. Invalid checkpoint field types are rejected before model
+construction or parameter restoration, as applicable.
+
 Mask bounds and ROI extraction live in `src/ops/mask.py`, shared by training
 augmentation and prediction. Predictors do not import the dataset package.
 Internal `src.data.pack` geometry moved to `src.ops.mask` as `extract_roi` and

@@ -427,14 +427,15 @@ class GroundPredictor:
         target = state["target"]
         for start in range(0, len(objects), self.prompt_batch_size):
             chunk = objects[start : start + self.prompt_batch_size]
-            masks = prompt_data.build_mask(
+            points, masks = prompt_data.build_prompt(
+                None,
+                None,
+                None,
                 np.stack([item["logit"] for item in chunk]),
+                target["orig_hw"],
+                self.image_size,
                 self.model.mask_input_size,
                 self.device,
-            )
-            points = (
-                torch.zeros(len(chunk), 1, 2, device=self.device),
-                -torch.ones(len(chunk), 1, dtype=torch.int, device=self.device),
             )
             with self.autocast():
                 encoded = self.model.encode_mask_prompts(points, masks)

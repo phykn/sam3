@@ -7,7 +7,7 @@ from PIL import Image
 from torch import nn
 
 from ..build import build_finetune_model
-from ..io.finetune import FORMAT, load_trainable_state
+from ..io.finetune import load_trainable_state, read_checkpoint
 from ..ml.model import Sam3ImageModel
 from ..prepare import image as image_data, prompt
 from .mask import format as mask_format
@@ -47,17 +47,9 @@ class SinglePredictor:
         device: str | torch.device = "cuda",
         cond: int = 0,
     ) -> "SinglePredictor":
-        checkpoint = torch.load(
-            checkpoint_path,
-            map_location="cpu",
-            weights_only=True,
-        )
-        if not isinstance(checkpoint, dict) or checkpoint.get("format") != FORMAT:
-            raise ValueError("unsupported finetune checkpoint format")
-        if "model" not in checkpoint or "config" not in checkpoint:
-            raise ValueError("finetune checkpoint fields are incomplete")
+        checkpoint = read_checkpoint(checkpoint_path)
         config = checkpoint["config"]
-        if not isinstance(config, dict) or not isinstance(config.get("model"), dict):
+        if not isinstance(config.get("model"), dict):
             raise ValueError("finetune checkpoint model config is missing")
         model_config = dict(config["model"])
         model_config["path"] = base_path
@@ -75,56 +67,6 @@ class SinglePredictor:
         if self._image_pe is None or self._image_pe.device != self.device:
             self._image_pe = self.model.get_image_position_encoding(self.device)
         return self._image_pe
-
-    def _merge_prompt(
-        self,
-        first: tuple[torch.Tensor, torch.Tensor] | None,
-        second: tuple[torch.Tensor, torch.Tensor] | None,
-    ) -> tuple[torch.Tensor, torch.Tensor] | None:
-        if first is None:
-            return second
-        if second is None:
-            return first
-        return torch.cat([first[0], second[0]], dim=1), torch.cat(
-            [first[1], second[1]],
-            dim=1,
-        )
-
-    def _make_dummy_prompt(self, batch_size: int) -> tuple[torch.Tensor, torch.Tensor]:
-        return (
-            torch.zeros(batch_size, 1, 2, device=self.device),
-            -torch.ones(batch_size, 1, dtype=torch.int, device=self.device),
-        )
-
-    def _make_prompt(
-        self,
-        embed: dict[str, object],
-        point_coords: np.ndarray | torch.Tensor | None,
-        point_labels: np.ndarray | torch.Tensor | None,
-        box: np.ndarray | torch.Tensor | None,
-        mask: np.ndarray | torch.Tensor | None,
-    ) -> tuple[tuple[torch.Tensor, torch.Tensor], torch.Tensor | None]:
-        point_prompt = self._merge_prompt(
-            prompt.build_box(box, embed["orig_hw"], self.image_size, self.device),
-            prompt.build_points(
-                point_coords,
-                point_labels,
-                embed["orig_hw"],
-                self.image_size,
-                self.device,
-            ),
-        )
-        mask_prompt = prompt.build_mask(
-            mask,
-            self.model.mask_input_size,
-            self.device,
-        )
-
-        if point_prompt is None and mask_prompt is None:
-            raise ValueError("prompt is required")
-        if point_prompt is None:
-            point_prompt = self._make_dummy_prompt(mask_prompt.shape[0])
-        return point_prompt, mask_prompt
 
     def _prompt_type(
         self,
@@ -150,7 +92,18 @@ class SinglePredictor:
         multimask: bool,
         cond: int | torch.Tensor | None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
-        sam_prompt = self._make_prompt(embed, point_coords, point_labels, box, mask)
+        if point_coords is None and box is None and mask is None:
+            raise ValueError("prompt is required")
+        sam_prompt = prompt.build_prompt(
+            point_coords,
+            point_labels,
+            box,
+            mask,
+            embed["orig_hw"],
+            self.image_size,
+            self.model.mask_input_size,
+            self.device,
+        )
         prompt_type = self._prompt_type(point_coords, box, mask)
         cond = self.cond if cond is None else cond
         with self.autocast():

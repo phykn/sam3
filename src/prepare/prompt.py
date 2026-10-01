@@ -3,6 +3,35 @@ import torch
 import torch.nn.functional as F
 
 
+def build_prompt(
+    coords: object | None,
+    labels: object | None,
+    box: object | None,
+    mask: object | None,
+    orig_hw: tuple[int, int],
+    size: int,
+    mask_size: tuple[int, int],
+    device: str | torch.device,
+) -> tuple[tuple[torch.Tensor, torch.Tensor], torch.Tensor | None]:
+    points = build_points(coords, labels, orig_hw, size, device)
+    boxes = build_box(box, orig_hw, size, device)
+    if points is None:
+        points = boxes
+    elif boxes is not None:
+        points = (
+            torch.cat([boxes[0], points[0]], dim=1),
+            torch.cat([boxes[1], points[1]], dim=1),
+        )
+    masks = build_mask(mask, mask_size, device)
+    if points is None:
+        batch = 1 if masks is None else masks.shape[0]
+        points = (
+            torch.zeros(batch, 1, 2, device=device),
+            -torch.ones(batch, 1, dtype=torch.int, device=device),
+        )
+    return points, masks
+
+
 def _scale(
     value: object,
     orig_hw: tuple[int, int],

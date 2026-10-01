@@ -8,6 +8,7 @@ from torch import nn
 from ..io.finetune import (
     FORMAT as FORMAT,
     load_trainable_state as load_trainable_state,
+    read_checkpoint,
     trainable_state as trainable_state,
     unwrap as unwrap,
 )
@@ -46,12 +47,12 @@ def load_checkpoint(
     optimizer: torch.optim.Optimizer,
     config: dict[str, Any],
 ) -> tuple[int, dict[str, Any]]:
-    checkpoint = torch.load(path, map_location="cpu", weights_only=True)
-    required = {"format", "step", "model", "optimizer", "config"}
+    checkpoint = read_checkpoint(path)
+    required = {"step", "optimizer"}
     if not required.issubset(checkpoint):
         raise ValueError("checkpoint fields are incomplete")
-    if checkpoint["format"] != FORMAT:
-        raise ValueError(f"unsupported checkpoint format: {checkpoint['format']}")
+    if not isinstance(checkpoint["optimizer"], dict):
+        raise ValueError("checkpoint optimizer must be a dictionary")
     validate_resume_config(checkpoint["config"], config)
     step = checkpoint["step"]
     if isinstance(step, bool) or not isinstance(step, Integral) or step < 0:

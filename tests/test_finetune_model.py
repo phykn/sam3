@@ -118,16 +118,15 @@ def test_lora_modules_are_not_registered_twice():
 
 
 def test_build_prompt_merges_box_and_point_inputs():
-    from src.prepare.batch import build_prompt
+    from src.prepare.prompt import build_prompt
 
     points, mask = build_prompt(
-        {
-            "points": [[4.0, 4.0]],
-            "point_labels": [1],
-            "box": [1.0, 1.0, 3.0, 3.0],
-            "mask": None,
-        },
-        image_size=8,
+        coords=[[4.0, 4.0]],
+        labels=[1],
+        box=[1.0, 1.0, 3.0, 3.0],
+        mask=None,
+        orig_hw=(8, 8),
+        size=8,
         mask_size=(2, 2),
         device=torch.device("cpu"),
     )

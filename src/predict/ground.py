@@ -7,8 +7,8 @@ import torch
 from PIL import Image
 from torch import nn
 
-from ..data import pack
 from ..ml.model import Sam3GroundingModel
+from ..ops.mask import extract_roi
 from ..prepare import ground, image as image_data, prompt as prompt_data
 from .ground_ops import output, reference, sim
 from .mask import format as mask_format
@@ -342,7 +342,7 @@ class GroundPredictor:
         mask = mask.detach().cpu().numpy()
         if self.largest_component:
             mask = largest(mask)
-        box, roi = pack.box_roi(mask)
+        box, roi = extract_roi(mask)
         if roi.size == 0:
             raise RuntimeError("point did not produce an object mask")
         return np.asarray(box, dtype=np.float32)
@@ -459,7 +459,7 @@ class GroundPredictor:
                 stability,
                 strict=True,
             ):
-                box, roi = pack.box_roi(mask)
+                box, roi = extract_roi(mask)
                 if roi.size == 0 or float(stable) <= item["metrics"]["stability_score"]:
                     out.append(dict(item))
                     continue
@@ -507,7 +507,7 @@ class GroundPredictor:
                 stability,
                 strict=True,
             ):
-                box, roi = pack.box_roi(mask)
+                box, roi = extract_roi(mask)
                 if roi.size == 0:
                     continue
                 refined = dict(item)

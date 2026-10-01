@@ -1,8 +1,8 @@
 import torch
 import torch.nn.functional as F
 
-from ...data import pack
 from ...ops.box import cxcywh_to_xyxy, nms_indices
+from ...ops.mask import extract_roi
 from . import sim
 
 
@@ -116,7 +116,7 @@ def finish(items, nms_thr, top_k, orig_hw, mask_batch_size, device):
         for index, (item, mask, logit) in enumerate(
             zip(chunk, masks, logits, strict=True)
         ):
-            box, roi = pack.box_roi(mask)
+            box, roi = extract_roi(mask)
             out.append(
                 {
                     "class_id": item["class_id"],

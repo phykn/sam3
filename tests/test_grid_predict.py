@@ -4,7 +4,7 @@ import torch
 from PIL import Image
 import src.predict.grid as grid_module
 from src.predict.grid import GridPredictor
-from src.predict.grid_ops.boxes import filter_crop, filter_image, find_box, is_edge_cut
+from src.predict.grid_ops.boxes import filter_crop, filter_image, is_edge_cut
 from src.predict.grid_ops.candidates import make_candidate, make_objects
 from src.predict.grid_ops.points import filter_points, make_points
 from src.predict.grid_ops.tiles import make_crops
@@ -370,15 +370,6 @@ def test_make_candidate_keeps_full_low_res_logit_and_scales_box_area():
     assert item["low_shape"] == (4, 4)
     assert item["stability_score"] == 1.0
     assert item["point"] == (12.0, 22.0)
-
-
-def test_find_box():
-    mask = np.zeros((6, 8), dtype=bool)
-    mask[1:3, 2:5] = True
-
-    box = find_box(mask)
-
-    assert box == (2, 1, 5, 3)
 
 
 def test_is_edge_cut_ignores_outer_image_edges():

@@ -1,5 +1,6 @@
 import numpy as np
 
+from ....ops.mask import find_box
 from .resize import resize
 
 
@@ -16,7 +17,8 @@ def random_crop(
     out_side = max(height, width)
     side = max(1, int(round(min(height, width) * scale)))
 
-    box = _find_box(mask)
+    source = mask[..., 0] if mask.ndim == 3 else mask
+    box = find_box(source > 0)
     if box is None:
         y0 = _rand_start(height, side)
         x0 = _rand_start(width, side)
@@ -34,14 +36,6 @@ def random_crop(
 def _check_scale(scale: float) -> None:
     if not 0.0 <= scale <= 1.0:
         raise ValueError("scale must be between 0 and 1")
-
-
-def _find_box(mask: np.ndarray) -> tuple[int, int, int, int] | None:
-    source = mask[..., 0] if mask.ndim == 3 else mask
-    ys, xs = np.where(source > 0)
-    if len(xs) == 0:
-        return None
-    return int(xs.min()), int(ys.min()), int(xs.max() + 1), int(ys.max() + 1)
 
 
 def _rand_start(size: int, crop_size: int) -> int:

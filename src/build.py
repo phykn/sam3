@@ -1,6 +1,10 @@
+from typing import TYPE_CHECKING
+
 from .adapt.model import FinetuneModel
-from .data.dataloader import InfiniteLoader, make_finetune_loader
 from .ml.model import Sam3GroundingModel, Sam3ImageModel, Sam3VideoModel
+
+if TYPE_CHECKING:
+    from .data.dataloader import InfiniteLoader
 
 
 def build_image_model(config: dict) -> Sam3ImageModel:
@@ -31,7 +35,9 @@ def build_finetune_loader(
     train: bool = True,
     rank: int = 0,
     world_size: int = 1,
-) -> InfiniteLoader:
+) -> "InfiniteLoader":
+    from .data.dataloader import make_finetune_loader
+
     return make_finetune_loader(
         config,
         num_classes=num_classes,

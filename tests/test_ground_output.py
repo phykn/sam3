@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import torch
 
-from src.data import pack
+from src.ops.mask import restore_mask
 from src.predict.ground_ops import output
 
 
@@ -155,7 +155,7 @@ def test_finish_resizes_only_candidates_selected_by_nms(monkeypatch):
     assert all("mask" not in item for item in out)
     assert all(item["roi"].dtype == np.bool_ for item in out)
     for item in out:
-        np.testing.assert_array_equal(pack.full((4, 5), item["box"], item["roi"]), mask)
+        np.testing.assert_array_equal(restore_mask((4, 5), item["box"], item["roi"]), mask)
 
 
 def test_finish_applies_top_k_per_class():

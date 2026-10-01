@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from src.data import pack
+from src.ops.mask import restore_mask
 from src.predict.mask import format as mask_format
 
 
@@ -45,7 +45,7 @@ def test_objects_preserve_prompt_and_candidate_axes():
     assert objects[0]["roi"].dtype == np.bool_
     assert objects[0]["metrics"]["class_logits"] == [0.0, 1.0, 2.0, 3.0]
     expected = mask_format.resize_masks(masks, (4, 6), 0.0)[0, 0].numpy()
-    actual = pack.full((4, 6), objects[0]["box"], objects[0]["roi"])
+    actual = restore_mask((4, 6), objects[0]["box"], objects[0]["roi"])
     np.testing.assert_array_equal(actual, expected)
 
 

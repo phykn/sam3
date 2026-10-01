@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-from ...data import pack
+from ...ops.mask import extract_roi
 
 
 def resize_masks(
@@ -58,7 +58,7 @@ def make_objects(
     out = []
     for prompt_index in range(masks.shape[0]):
         for candidate_index in range(masks.shape[1]):
-            box, roi = pack.box_roi(masks[prompt_index, candidate_index])
+            box, roi = extract_roi(masks[prompt_index, candidate_index])
             if roi.size == 0:
                 continue
             metrics = {"score": float(scores[prompt_index, candidate_index])}

@@ -5,13 +5,6 @@ import numpy as np
 from ...ops.box import nms_indices
 
 
-def find_box(mask: np.ndarray) -> tuple[int, int, int, int] | None:
-    ys, xs = np.nonzero(mask)
-    if len(xs) == 0:
-        return None
-    return (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
-
-
 def scale_box(
     box: tuple[int, int, int, int],
     shape: tuple[int, int],

@@ -14,6 +14,7 @@ def test_core_packages_are_grouped_by_responsibility():
     root = Path(__file__).resolve().parents[1]
     paths = (
         "src/ops/box.py",
+        "src/ops/mask.py",
         "src/ops/tensor.py",
         "src/ml/runtime/attention.py",
         "src/ml/runtime/checkpointing.py",

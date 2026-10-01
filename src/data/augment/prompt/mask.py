@@ -1,6 +1,8 @@
 import numpy as np
 from PIL import Image, ImageFilter
 
+from ....ops.mask import find_box
+
 OPS = ("none", "shift", "erode", "dilate", "blur", "resize")
 
 
@@ -28,7 +30,7 @@ def degrade_mask_prompt(
 
 def _shift_mask(target: np.ndarray) -> np.ndarray:
     height, width = target.shape
-    box = _find_tight_box(target)
+    box = find_box(target > 0)
     if box is None:
         return np.zeros_like(target, dtype=np.uint8)
 
@@ -58,13 +60,6 @@ def _make_coarse_mask(target: np.ndarray) -> np.ndarray:
     image = image.resize(small, Image.Resampling.BILINEAR)
     image = image.resize((width, height), Image.Resampling.BILINEAR)
     return _to_soft_float(image)
-
-
-def _find_tight_box(target: np.ndarray) -> tuple[int, int, int, int] | None:
-    ys, xs = np.where(target > 0)
-    if len(xs) == 0:
-        return None
-    return xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
 
 
 def _to_pil_mask(target: np.ndarray) -> Image.Image:

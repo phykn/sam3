@@ -15,6 +15,7 @@ src/prepare/       shared image normalization, resize, and prompt conversion
 src/adapt/         LoRA layers, feature adapters, router, and finetuning model
 src/finetune/      training loss, resume checkpoints, DDP, and trainer
 src/io/            local base weights and shared trainable-state serialization
+src/ops/           shared box, mask ROI, and tensor operations
 src/ml/            SAM 3.1 components -> workflow blocks -> assembled models
 src/predict/       single-image, grid, grounding, and video predictors
 backend/           FastAPI sessions and image upload/response conversion
@@ -32,6 +33,13 @@ random training augmentation stays in `src/data/`. LoRA computation lives in
 `src/adapt/` so importing predictors does not import the trainer or TensorBoard.
 `src/build.py` assembles models and loaders. Training state and optimizer resume
 remain owned by `src/finetune/`.
+
+Mask bounds and ROI extraction live in `src/ops/mask.py`, shared by training
+augmentation and prediction. Predictors do not import the dataset package.
+Internal `src.data.pack` geometry moved to `src.ops.mask` as `extract_roi` and
+`restore_mask`; `find_box` also replaces the local augmentation and grid helpers.
+Sample image/ROI serialization remains in `src.data.sample`. Model builders
+import dataset code only when `build_finetune_loader` is called.
 
 The web screen delegates request ordering and prompt state to
 `frontend/src/session.ts`; `useSession.ts` owns the React subscription and image

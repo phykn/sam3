@@ -1,12 +1,17 @@
 import numpy as np
 
+from ....ops.mask import find_box
+
 
 def jitter_mask_box(
     target: np.ndarray,
     image_shape: tuple[int, ...],
     amount: float = 0.1,
 ) -> np.ndarray:
-    base = find_tight_box(target)
+    box = find_box(target > 0)
+    if box is None:
+        raise ValueError("target mask must contain foreground")
+    base = np.asarray(box, dtype=np.float32)
     if amount <= 0:
         return base
 
@@ -29,16 +34,3 @@ def jitter_mask_box(
     if out[2] <= out[0] or out[3] <= out[1]:
         return base
     return out
-
-
-def find_tight_box(target: np.ndarray) -> np.ndarray:
-    ys, xs = np.where(target > 0)
-    return np.array(
-        [
-            float(xs.min()),
-            float(ys.min()),
-            float(xs.max() + 1),
-            float(ys.max() + 1),
-        ],
-        dtype=np.float32,
-    )

@@ -1,6 +1,6 @@
 import numpy as np
 
-from ...data import pack
+from ...ops.mask import extract_roi
 
 
 def sort_area(
@@ -138,7 +138,7 @@ def _intersection(first: dict[str, object], second: dict[str, object]) -> int:
 
 def _compact(item: dict[str, object]) -> dict[str, object]:
     x0, y0, _, _ = item["box"]
-    local_box, roi = pack.box_roi(item["roi"])
+    local_box, roi = extract_roi(item["roi"])
     lx0, ly0, lx1, ly1 = local_box
     item["box"] = (x0 + lx0, y0 + ly0, x0 + lx1, y0 + ly1)
     item["roi"] = roi.astype(bool)

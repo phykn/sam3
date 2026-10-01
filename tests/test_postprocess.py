@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from src.data import pack
+from src.ops.mask import restore_mask
 from src.predict.mask.component import largest
 from src.predict.mask.postprocess import (
     drop_edge,
@@ -69,7 +69,7 @@ def test_make_exclusive_keeps_small_masks_and_cuts_large_masks():
 
     out = make_exclusive([large, small], min_ratio=0.7)
 
-    masks = [pack.full((4, 4), value["box"], value["roi"]) for value in out]
+    masks = [restore_mask((4, 4), value["box"], value["roi"]) for value in out]
     assert [int(mask.sum()) for mask in masks] == [12, 4]
     assert not (masks[0] & masks[1]).any()
     assert [value["object_id"] for value in out] == [1, 2]

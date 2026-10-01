@@ -44,6 +44,9 @@ def test_prediction_import_does_not_initialize_training():
             sys.executable,
             "-c",
             "import sys; import src.predict; "
+            "assert not any(name == 'src.data' or name.startswith('src.data.') "
+            "for name in sys.modules); "
+            "assert 'albumentations' not in sys.modules; "
             "assert 'src.finetune.trainer' not in sys.modules; "
             "assert 'torch.utils.tensorboard' not in sys.modules",
         ],
@@ -149,6 +152,16 @@ def test_predict_does_not_import_model_internals() -> None:
                 bad.append(f"{path.relative_to(ROOT)}: {name}")
             if ".ml.blocks" in name or ".ml.components" in name:
                 bad.append(f"{path.relative_to(ROOT)}: {name}")
+    assert bad == []
+
+
+def test_predict_and_mask_ops_do_not_import_dataset_code() -> None:
+    paths = list((ROOT / "predict").rglob("*.py")) + list((ROOT / "ops").glob("*.py"))
+    bad = []
+    for path in paths:
+        for name in resolve_imports(path):
+            if name == "src.data" or name.startswith("src.data."):
+                bad.append(f"{path.relative_to(WORKSPACE)}: {name}")
     assert bad == []
 
 

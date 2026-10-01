@@ -3,7 +3,7 @@ import pytest
 import torch
 from PIL import Image
 
-from src.data import pack
+from src.ops.mask import restore_mask
 from src.finetune.checkpoint import FORMAT
 from src.predict.single import SinglePredictor
 
@@ -108,7 +108,7 @@ def test_single_predictor_predicts_from_box():
     assert item["candidate_index"] == 0
     assert item["logit"].shape == (288, 288)
     assert item["metrics"]["score"] == pytest.approx(0.75)
-    mask = pack.full((10, 20), item["box"], item["roi"])
+    mask = restore_mask((10, 20), item["box"], item["roi"])
     assert mask.shape == (10, 20)
     assert mask.all()
     coords, labels = model.prompts[0][0]
@@ -179,7 +179,7 @@ def test_single_predictor_refines_from_logit():
     )
 
     assert len(objects) == 1
-    assert pack.full((10, 20), objects[0]["box"], objects[0]["roi"]).all()
+    assert restore_mask((10, 20), objects[0]["box"], objects[0]["roi"]).all()
     assert model.prompts[0][2].dtype == torch.float32
     assert model.prompts[0][0][1].tolist() == [[1]]
     assert model.decodes[0]["multimask"] is False

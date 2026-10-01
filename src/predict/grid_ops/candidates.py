@@ -1,7 +1,8 @@
 import numpy as np
 from PIL import Image
 
-from .boxes import find_box, scale_area, scale_box
+from ...ops.mask import find_box
+from .boxes import scale_area, scale_box
 
 
 def make_candidate(

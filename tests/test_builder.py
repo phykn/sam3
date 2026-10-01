@@ -101,7 +101,7 @@ def test_build_finetune_model_returns_finetune_model(monkeypatch):
 
 
 def test_build_finetune_loader_uses_split_and_rank(monkeypatch):
-    import src.build as build_module
+    import src.data.dataloader as loader_module
 
     calls = []
 
@@ -125,7 +125,7 @@ def test_build_finetune_loader_uses_split_and_rank(monkeypatch):
         )
         return "loader"
 
-    monkeypatch.setattr(build_module, "make_finetune_loader", make_loader)
+    monkeypatch.setattr(loader_module, "make_finetune_loader", make_loader)
 
     loader = build_finetune_loader(
         {
